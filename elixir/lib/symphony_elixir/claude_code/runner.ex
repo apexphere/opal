@@ -116,7 +116,9 @@ defmodule SymphonyElixir.ClaudeCode.Runner do
     base
     |> maybe_add_allowed_tools(cmd_settings.allowed_tools)
     |> Kernel.++(cmd_settings.extra_flags)
-    |> Kernel.++([prompt])
+    # `--` ends option parsing so the prompt is never consumed by a preceding
+    # variadic flag like `--allowedTools <tools...>`.
+    |> Kernel.++(["--", prompt])
   end
 
   defp maybe_add_allowed_tools(args, nil), do: args
