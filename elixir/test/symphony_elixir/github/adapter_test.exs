@@ -48,6 +48,25 @@ defmodule SymphonyElixir.Github.AdapterTest do
     end
   end
 
+  defmodule MockGithubClientWithErrors do
+    alias SymphonyElixir.Linear.Issue
+
+    def fetch_issue_states_by_ids(_ids) do
+      {:ok, [%Issue{id: "1", identifier: "#1", state: "Todo", labels: ["todo"]}]}
+    end
+
+    def remove_label(_issue_number, _label), do: {:error, :remove_failed}
+    def update_issue(_issue_number, _attrs), do: :ok
+    def add_labels(_issue_number, _labels), do: :ok
+  end
+
+  defmodule MockGithubClientFetchError do
+    def fetch_issue_states_by_ids(_ids), do: {:error, :not_found}
+    def remove_label(_issue_number, _label), do: :ok
+    def update_issue(_issue_number, _attrs), do: :ok
+    def add_labels(_issue_number, _labels), do: :ok
+  end
+
   setup do
     Application.put_env(:symphony_elixir, :github_client_module, MockGithubClient)
 
@@ -128,6 +147,27 @@ defmodule SymphonyElixir.Github.AdapterTest do
       assert :ok = Adapter.update_issue_state("1", "Human Review")
       assert_received {:mock_remove_label, "1", "todo"}
       assert_received {:mock_add_labels, "1", ["human-review"]}
+    end
+
+    test "skips add_state_label when target state maps to nil label" do
+      # "Cancelled" maps to nil label via state_name_to_label, so no label is added
+      assert :ok = Adapter.update_issue_state("1", "Cancelled")
+      assert_received {:mock_fetch_issue_states_by_ids, ["1"]}
+      assert_received {:mock_remove_label, "1", "todo"}
+      assert_received {:mock_update_issue, "1", %{state: "open"}}
+      refute_received {:mock_add_labels, _, _}
+    end
+
+    test "returns error when remove_label fails during state transition" do
+      Application.put_env(:symphony_elixir, :github_client_module, MockGithubClientWithErrors)
+      assert {:error, :remove_failed} = Adapter.update_issue_state("1", "In Progress")
+      Application.put_env(:symphony_elixir, :github_client_module, MockGithubClient)
+    end
+
+    test "handles fetch_issue_states_by_ids returning error during state lookup" do
+      Application.put_env(:symphony_elixir, :github_client_module, MockGithubClientFetchError)
+      assert :ok = Adapter.update_issue_state("1", "In Progress")
+      Application.put_env(:symphony_elixir, :github_client_module, MockGithubClient)
     end
   end
 end
