@@ -52,6 +52,8 @@ defmodule SymphonyElixir.Config.Schema do
       field(:assignee, :string)
       field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
       field(:terminal_states, {:array, :string}, default: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
+      field(:repo, :string)
+      field(:labels_prefix, :string, default: "")
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -59,7 +61,7 @@ defmodule SymphonyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:kind, :endpoint, :api_key, :project_slug, :assignee, :active_states, :terminal_states],
+        [:kind, :endpoint, :api_key, :project_slug, :assignee, :active_states, :terminal_states, :repo, :labels_prefix],
         empty_values: []
       )
     end
@@ -366,10 +368,16 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp finalize_settings(settings) do
+    {api_key_fallback_env, assignee_fallback_env} =
+      case settings.tracker.kind do
+        "github" -> {"GITHUB_TOKEN", "GITHUB_ASSIGNEE"}
+        _ -> {"LINEAR_API_KEY", "LINEAR_ASSIGNEE"}
+      end
+
     tracker = %{
       settings.tracker
-      | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
-        assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
+      | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env(api_key_fallback_env)),
+        assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env(assignee_fallback_env))
     }
 
     workspace = %{
