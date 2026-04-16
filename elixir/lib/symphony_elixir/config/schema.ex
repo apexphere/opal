@@ -409,7 +409,8 @@ defmodule SymphonyElixir.Config.Schema do
     tracker = %{
       settings.tracker
       | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env(api_key_fallback_env)),
-        assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env(assignee_fallback_env))
+        assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env(assignee_fallback_env)),
+        repo: resolve_secret_setting(settings.tracker.repo, System.get_env("GITHUB_REPO"))
     }
 
     workspace = %{

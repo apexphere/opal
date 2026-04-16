@@ -86,6 +86,33 @@ defmodule SymphonyElixir.CoreTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "123")
     assert {:error, {:unsupported_tracker_kind, "123"}} = Config.validate!()
+
+    # github tracker requires repo + api_key
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_api_token: nil,
+      tracker_project_slug: nil
+    )
+
+    assert {:error, :missing_github_api_token} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_api_token: "ghp_x",
+      tracker_project_slug: nil,
+      tracker_repo: nil
+    )
+
+    assert {:error, :missing_github_repo} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_api_token: "ghp_x",
+      tracker_project_slug: nil,
+      tracker_repo: "owner/repo"
+    )
+
+    assert :ok = Config.validate!()
   end
 
   test "current WORKFLOW.md file is valid and complete" do
@@ -786,6 +813,51 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "attempt=3"
   end
 
+  test "prompt builder exposes task.X alongside issue.X with task.number aliasing identifier" do
+    workflow_prompt =
+      "Task {{ task.number }} - {{ task.title }} state={{ task.state }} url={{ task.url }} labels={{ task.labels }}"
+
+    write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
+
+    issue = %Issue{
+      identifier: "MT-42",
+      title: "Add a thing",
+      description: "Body text",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-42",
+      labels: ["backend", "priority"]
+    }
+
+    prompt = PromptBuilder.build_prompt(issue)
+
+    assert prompt =~ "Task MT-42"
+    assert prompt =~ "Add a thing"
+    assert prompt =~ "state=In Progress"
+    assert prompt =~ "url=https://example.org/issues/MT-42"
+    assert prompt =~ "labels=backendpriority"
+  end
+
+  test "prompt builder still resolves legacy issue.X variables for backwards compat" do
+    workflow_prompt =
+      "Legacy issue={{ issue.identifier }} new task={{ task.number }} same? equal"
+
+    write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
+
+    issue = %Issue{
+      identifier: "MT-100",
+      title: "Compat",
+      description: nil,
+      state: "Todo",
+      url: "https://example.org/issues/MT-100",
+      labels: []
+    }
+
+    prompt = PromptBuilder.build_prompt(issue)
+
+    assert prompt =~ "Legacy issue=MT-100"
+    assert prompt =~ "new task=MT-100"
+  end
+
   test "prompt builder renders issue datetime fields without crashing" do
     workflow_prompt = "Ticket {{ issue.identifier }} created={{ issue.created_at }} updated={{ issue.updated_at }}"
 
@@ -883,14 +955,17 @@ defmodule SymphonyElixir.CoreTest do
 
     prompt = PromptBuilder.build_prompt(issue)
 
-    assert prompt =~ "You are working on a Linear issue."
-    assert prompt =~ "Identifier: MT-777"
-    assert prompt =~ "Title: Make fallback prompt useful"
-    assert prompt =~ "Body:"
+    assert prompt =~ "autonomous coding agent working on task MT-777"
+    assert prompt =~ "Make fallback prompt useful"
     assert prompt =~ "Include enough issue context to start working."
-    assert Config.workflow_prompt() =~ "{{ issue.identifier }}"
-    assert Config.workflow_prompt() =~ "{{ issue.title }}"
-    assert Config.workflow_prompt() =~ "{{ issue.description }}"
+    assert prompt =~ "Project context"
+    assert prompt =~ "CLAUDE.md"
+    assert prompt =~ "AGENTS.md"
+    assert prompt =~ "README.md"
+    assert prompt =~ "Execution rules"
+    assert Config.workflow_prompt() =~ "{{ task.number }}"
+    assert Config.workflow_prompt() =~ "{{ task.title }}"
+    assert Config.workflow_prompt() =~ "{{ task.description }}"
   end
 
   test "prompt builder default template handles missing issue body" do
@@ -907,8 +982,8 @@ defmodule SymphonyElixir.CoreTest do
 
     prompt = PromptBuilder.build_prompt(issue)
 
-    assert prompt =~ "Identifier: MT-778"
-    assert prompt =~ "Title: Handle empty body"
+    assert prompt =~ "task MT-778"
+    assert prompt =~ "Handle empty body"
     assert prompt =~ "No description provided."
   end
 

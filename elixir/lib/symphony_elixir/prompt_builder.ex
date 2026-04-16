@@ -1,6 +1,10 @@
 defmodule SymphonyElixir.PromptBuilder do
   @moduledoc """
-  Builds agent prompts from Linear issue data.
+  Builds agent prompts from issue data.
+
+  Templates can use either the legacy `issue.X` variable namespace or the
+  generic `task.X` namespace (added for tracker-agnostic templates). Both
+  point to the same underlying data; `task.number` aliases `issue.identifier`.
   """
 
   alias SymphonyElixir.{Config, Workflow}
@@ -14,11 +18,15 @@ defmodule SymphonyElixir.PromptBuilder do
       |> prompt_template!()
       |> parse_template!()
 
+    issue_map = issue |> Map.from_struct() |> to_solid_map()
+    task_map = Map.put(issue_map, "number", Map.get(issue_map, "identifier"))
+
     template
     |> Solid.render!(
       %{
         "attempt" => Keyword.get(opts, :attempt),
-        "issue" => issue |> Map.from_struct() |> to_solid_map()
+        "issue" => issue_map,
+        "task" => task_map
       },
       @render_opts
     )

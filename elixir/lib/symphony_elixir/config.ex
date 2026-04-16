@@ -6,17 +6,42 @@ defmodule SymphonyElixir.Config do
   alias SymphonyElixir.Config.Schema
   alias SymphonyElixir.Workflow
 
-  @default_prompt_template """
-  You are working on a Linear issue.
+  @default_prompt_template ~S"""
+  You are an autonomous coding agent working on task {{ task.number }}: {{ task.title }}
 
-  Identifier: {{ issue.identifier }}
-  Title: {{ issue.title }}
+  ## Task
 
-  Body:
-  {% if issue.description %}
-  {{ issue.description }}
+  {% if task.description %}
+  {{ task.description }}
   {% else %}
   No description provided.
+  {% endif %}
+
+  ## Project context
+
+  Read and follow the project's own documentation before doing anything else:
+
+  - `CLAUDE.md` (agent instructions, if present)
+  - `AGENTS.md` (agent conventions, if present)
+  - `README.md` (project overview)
+  - `CONTRIBUTING.md` (contribution conventions, if present)
+
+  Treat the project's own instructions as authoritative. They override any
+  generic guidance below when they conflict.
+
+  ## Execution rules
+
+  1. Understand the project first — read its docs, scan its structure, learn
+     its conventions.
+  2. Work autonomously. Do not ask for human input unless you are truly
+     blocked.
+  3. Follow the project's own testing, formatting, and code style conventions.
+  4. Create a branch, implement the change, run the project's tests, commit,
+     push, and open a pull request that links back to this task.
+
+  {% if attempt %}
+  This is retry attempt #{{ attempt }}. Resume from the current workspace
+  state instead of restarting from scratch.
   {% endif %}
   """
 
@@ -115,21 +140,28 @@ defmodule SymphonyElixir.Config do
   end
 
   defp validate_semantics(settings) do
+    case settings.tracker.kind do
+      nil -> {:error, :missing_tracker_kind}
+      "linear" -> validate_linear_tracker(settings.tracker)
+      "github" -> validate_github_tracker(settings.tracker)
+      "memory" -> :ok
+      kind -> {:error, {:unsupported_tracker_kind, kind}}
+    end
+  end
+
+  defp validate_linear_tracker(tracker) do
     cond do
-      is_nil(settings.tracker.kind) ->
-        {:error, :missing_tracker_kind}
+      not is_binary(tracker.api_key) -> {:error, :missing_linear_api_token}
+      not is_binary(tracker.project_slug) -> {:error, :missing_linear_project_slug}
+      true -> :ok
+    end
+  end
 
-      settings.tracker.kind not in ["linear", "memory"] ->
-        {:error, {:unsupported_tracker_kind, settings.tracker.kind}}
-
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.api_key) ->
-        {:error, :missing_linear_api_token}
-
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.project_slug) ->
-        {:error, :missing_linear_project_slug}
-
-      true ->
-        :ok
+  defp validate_github_tracker(tracker) do
+    cond do
+      not is_binary(tracker.api_key) -> {:error, :missing_github_api_token}
+      not is_binary(tracker.repo) -> {:error, :missing_github_repo}
+      true -> :ok
     end
   end
 
