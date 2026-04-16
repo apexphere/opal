@@ -1,40 +1,52 @@
-# Symphony
+# Opal — Orchestrated Project Agent Layer
 
-Symphony turns project work into isolated, autonomous implementation runs, allowing teams to manage
-work instead of supervising coding agents.
+Opal is a containerized agent orchestrator that can work on any project. Mount a project volume,
+point Opal at it, and autonomous coding agents pick up issues from GitHub and deliver PRs — guided
+by the project's own documentation.
 
-[![Symphony demo video preview](.github/media/symphony-demo-poster.jpg)](.github/media/symphony-demo.mp4)
+Built on [OpenAI's Symphony](https://github.com/openai/symphony) orchestration framework (Elixir/OTP),
+extended with:
 
-_In this [demo video](.github/media/symphony-demo.mp4), Symphony monitors a Linear board for work and spawns agents to handle the tasks. The agents complete the tasks and provide proof of work: CI status, PR review feedback, complexity analysis, and walkthrough videos. When accepted, the agents land the PR safely. Engineers do not need to supervise Codex; they can manage the work at a higher level._
+- **GitHub Issues** as the task source (replacing Linear)
+- **Claude Code** (`claude -p`) as the agent runtime (replacing Codex)
+- **Project-adaptive prompts** that read your project's own CLAUDE.md / README and follow them
+- **Docker packaging** for drop-in use with any codebase
 
 > [!WARNING]
-> Symphony is a low-key engineering preview for testing in trusted environments.
+> Opal is under active development. The three adapter issues are tracked in GitHub Issues.
 
-## Running Symphony
+## Vision
 
-### Requirements
+```bash
+docker run -v /path/to/your-project:/project \
+           -v /tmp/workspaces:/workspace \
+           -e GITHUB_TOKEN=ghp_... \
+           opal:latest
+```
 
-Symphony works best in codebases that have adopted
-[harness engineering](https://openai.com/index/harness-engineering/). Symphony is the next step --
-moving from managing coding agents to managing work that needs to get done.
+Opal reads the project's documentation, polls GitHub Issues for work, creates isolated workspaces,
+and runs Claude Code agents to implement, test, and open PRs — all without project-specific
+configuration.
 
-### Option 1. Make your own
+## Roadmap
 
-Tell your favorite coding agent to build Symphony in a programming language of your choice:
+| # | Feature | Status |
+|---|---------|--------|
+| [#1](https://github.com/apexphere/opal/issues/1) | GitHub Issues tracker adapter | Planned |
+| [#2](https://github.com/apexphere/opal/issues/2) | Claude Code agent adapter (`claude -p`) | Planned |
+| [#3](https://github.com/apexphere/opal/issues/3) | Generic prompt + Docker packaging | Planned |
 
-> Implement Symphony according to the following spec:
-> https://github.com/openai/symphony/blob/main/SPEC.md
+## Current state
 
-### Option 2. Use our experimental reference implementation
+The codebase is forked from [openai/symphony](https://github.com/openai/symphony) and includes:
 
-Check out [elixir/README.md](elixir/README.md) for instructions on how to set up your environment
-and run the Elixir-based Symphony implementation. You can also ask your favorite coding agent to
-help with the setup:
+- **Orchestrator** — GenServer polling loop with concurrency, retries, and reconciliation
+- **Workspace manager** — per-issue isolation with lifecycle hooks
+- **Prompt builder** — Liquid template rendering with task context
+- **Observability** — terminal dashboard + Phoenix LiveView UI
+- **SPEC.md** — language-agnostic specification for building your own
 
-> Set up Symphony for my repository based on
-> https://github.com/openai/symphony/blob/main/elixir/README.md
-
----
+See [elixir/README.md](elixir/README.md) for the Elixir reference implementation setup.
 
 ## License
 
