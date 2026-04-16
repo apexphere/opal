@@ -37,10 +37,11 @@ defmodule SymphonyElixir.Github.ClientTest do
     agent = Agent.start_link(fn -> responses end) |> elem(1)
 
     fun = fn method, path, body ->
-      response = Agent.get_and_update(agent, fn
-        [next | rest] -> {next, rest}
-        [] -> {{:ok, %{status: 500, body: "no more responses"}}, []}
-      end)
+      response =
+        Agent.get_and_update(agent, fn
+          [next | rest] -> {next, rest}
+          [] -> {{:ok, %{status: 500, body: "no more responses"}}, []}
+        end)
 
       send(self(), {:github_api_call, method, path, body})
       response
