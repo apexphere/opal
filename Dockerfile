@@ -38,4 +38,9 @@ VOLUME /workspace
 
 ENV WORKSPACE_ROOT=/workspace
 
+# Phoenix LiveView observability dashboard. The default WORKFLOW.md binds
+# this to 0.0.0.0:4000 inside the container; publish it with
+# `docker run -p 4000:4000 ...` to view from the host.
+EXPOSE 4000
+
 ENTRYPOINT ["/usr/local/bin/opal-entrypoint"]

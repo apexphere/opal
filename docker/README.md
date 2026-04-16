@@ -24,12 +24,26 @@ Minimal invocation:
 
 ```bash
 docker run --rm -it \
+  -p 4000:4000 \
   -v "$PWD":/project \
   -v /tmp/opal-workspaces:/workspace \
   -e GITHUB_TOKEN=ghp_... \
   -e GITHUB_REPO=owner/repo \
   opal
 ```
+
+## Observability dashboard
+
+The Phoenix LiveView dashboard listens on port `4000` inside the container
+(bound to `0.0.0.0` by the default WORKFLOW.md). Publish the port with
+`-p 4000:4000` and open <http://localhost:4000> to watch live agent activity,
+token usage, rate limits, and the running/queued agent table.
+
+To pick a different host port, change the left side of `-p`, e.g.
+`-p 8080:4000` then visit <http://localhost:8080>.
+
+To disable the dashboard entirely, set `observability.dashboard_enabled:
+false` and/or remove the `server:` block in your project's `WORKFLOW.md`.
 
 ## How the WORKFLOW.md is selected
 
