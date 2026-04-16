@@ -105,11 +105,18 @@ defmodule SymphonyElixir.TestSupport do
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
           worker_ssh_hosts: [],
           worker_max_concurrent_agents_per_host: nil,
+          agent_runtime: "codex",
           max_concurrent_agents: 10,
           max_turns: 20,
           max_retry_backoff_ms: 300_000,
           max_concurrent_agents_by_state: %{},
           codex_command: "codex app-server",
+          claude_code_command: "claude",
+          claude_code_model: "claude-sonnet-4-6",
+          claude_code_allowed_tools: "Edit,Write,Bash,Read,Glob,Grep",
+          claude_code_permission_mode: "acceptEdits",
+          claude_code_extra_flags: [],
+          claude_code_turn_timeout_ms: 3_600_000,
           codex_approval_policy: %{reject: %{sandbox_approval: true, rules: true, mcp_elicitations: true}},
           codex_thread_sandbox: "workspace-write",
           codex_turn_sandbox_policy: nil,
@@ -144,11 +151,18 @@ defmodule SymphonyElixir.TestSupport do
     workspace_root = Keyword.get(config, :workspace_root)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
     worker_max_concurrent_agents_per_host = Keyword.get(config, :worker_max_concurrent_agents_per_host)
+    agent_runtime = Keyword.get(config, :agent_runtime)
     max_concurrent_agents = Keyword.get(config, :max_concurrent_agents)
     max_turns = Keyword.get(config, :max_turns)
     max_retry_backoff_ms = Keyword.get(config, :max_retry_backoff_ms)
     max_concurrent_agents_by_state = Keyword.get(config, :max_concurrent_agents_by_state)
     codex_command = Keyword.get(config, :codex_command)
+    claude_code_command = Keyword.get(config, :claude_code_command)
+    claude_code_model = Keyword.get(config, :claude_code_model)
+    claude_code_allowed_tools = Keyword.get(config, :claude_code_allowed_tools)
+    claude_code_permission_mode = Keyword.get(config, :claude_code_permission_mode)
+    claude_code_extra_flags = Keyword.get(config, :claude_code_extra_flags)
+    claude_code_turn_timeout_ms = Keyword.get(config, :claude_code_turn_timeout_ms)
     codex_approval_policy = Keyword.get(config, :codex_approval_policy)
     codex_thread_sandbox = Keyword.get(config, :codex_thread_sandbox)
     codex_turn_sandbox_policy = Keyword.get(config, :codex_turn_sandbox_policy)
@@ -186,6 +200,7 @@ defmodule SymphonyElixir.TestSupport do
         "  root: #{yaml_value(workspace_root)}",
         worker_yaml(worker_ssh_hosts, worker_max_concurrent_agents_per_host),
         "agent:",
+        "  runtime: #{yaml_value(agent_runtime)}",
         "  max_concurrent_agents: #{yaml_value(max_concurrent_agents)}",
         "  max_turns: #{yaml_value(max_turns)}",
         "  max_retry_backoff_ms: #{yaml_value(max_retry_backoff_ms)}",
@@ -198,6 +213,13 @@ defmodule SymphonyElixir.TestSupport do
         "  turn_timeout_ms: #{yaml_value(codex_turn_timeout_ms)}",
         "  read_timeout_ms: #{yaml_value(codex_read_timeout_ms)}",
         "  stall_timeout_ms: #{yaml_value(codex_stall_timeout_ms)}",
+        "claude_code:",
+        "  command: #{yaml_value(claude_code_command)}",
+        "  model: #{yaml_value(claude_code_model)}",
+        "  allowed_tools: #{yaml_value(claude_code_allowed_tools)}",
+        "  permission_mode: #{yaml_value(claude_code_permission_mode)}",
+        "  extra_flags: #{yaml_value(claude_code_extra_flags)}",
+        "  turn_timeout_ms: #{yaml_value(claude_code_turn_timeout_ms)}",
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
