@@ -49,7 +49,7 @@ defmodule SymphonyElixir.Github.E2ETest do
     test "fetches open issues from GitHub" do
       assert {:ok, issues} = Adapter.fetch_candidate_issues()
       assert is_list(issues)
-      assert length(issues) >= 2
+      assert [_, _ | _] = issues
 
       issue = Enum.find(issues, &(&1.identifier == "#1"))
       assert %Issue{} = issue
@@ -68,7 +68,7 @@ defmodule SymphonyElixir.Github.E2ETest do
       assert is_list(issues)
 
       todo_issues = Enum.filter(issues, &(&1.state == "Todo"))
-      assert length(todo_issues) >= 1
+      assert [_ | _] = todo_issues
     end
 
     test "fetches issues in In Progress state" do
@@ -76,7 +76,7 @@ defmodule SymphonyElixir.Github.E2ETest do
       assert is_list(issues)
 
       in_progress = Enum.filter(issues, &(&1.state == "In Progress"))
-      assert length(in_progress) >= 1
+      assert [_ | _] = in_progress
     end
 
     test "returns empty for states with no issues" do

@@ -39,9 +39,8 @@ defmodule SymphonyElixir.Github.Adapter do
         new_label = Client.state_name_to_label(state_name, labels_prefix)
 
         with :ok <- remove_state_labels(issue_id, current_state_labels),
-             :ok <- ensure_open(issue_id),
-             :ok <- add_state_label(issue_id, new_label) do
-          :ok
+             :ok <- ensure_open(issue_id) do
+          add_state_label(issue_id, new_label)
         end
     end
   end

@@ -169,16 +169,8 @@ defmodule SymphonyElixir.Github.Client do
     results =
       Enum.reduce_while(labels, {:ok, %{}}, fn label, {:ok, acc} ->
         case fetch_all_pages(tracker, [label], tracker.assignee) do
-          {:ok, issues} ->
-            merged =
-              Enum.reduce(issues, acc, fn issue, map ->
-                Map.put_new(map, issue.id, issue)
-              end)
-
-            {:cont, {:ok, merged}}
-
-          {:error, reason} ->
-            {:halt, {:error, reason}}
+          {:ok, issues} -> {:cont, {:ok, merge_issues(issues, acc)}}
+          {:error, reason} -> {:halt, {:error, reason}}
         end
       end)
 
@@ -186,6 +178,10 @@ defmodule SymphonyElixir.Github.Client do
       {:ok, issues_map} -> {:ok, Map.values(issues_map)}
       error -> error
     end
+  end
+
+  defp merge_issues(issues, acc) do
+    Enum.reduce(issues, acc, fn issue, map -> Map.put_new(map, issue.id, issue) end)
   end
 
   defp fetch_issues_by_numbers(tracker, issue_numbers) do
@@ -288,24 +284,24 @@ defmodule SymphonyElixir.Github.Client do
     end)
   end
 
+  @state_name_to_label_map %{
+    "todo" => "todo",
+    "in progress" => "in-progress",
+    "human review" => "human-review"
+  }
+
+  @terminal_states MapSet.new(["done", "closed", "cancelled", "canceled"])
+
   @doc false
   @spec state_name_to_label(String.t(), String.t()) :: String.t() | nil
   def state_name_to_label(state_name, labels_prefix) do
-    base =
-      case String.downcase(String.trim(state_name)) do
-        "todo" -> "todo"
-        "in progress" -> "in-progress"
-        "human review" -> "human-review"
-        "done" -> nil
-        "closed" -> nil
-        "cancelled" -> nil
-        "canceled" -> nil
-        other -> other
-      end
+    normalized = String.downcase(String.trim(state_name))
 
-    case base do
-      nil -> nil
-      label -> labels_prefix <> label
+    if MapSet.member?(@terminal_states, normalized) do
+      nil
+    else
+      base = Map.get(@state_name_to_label_map, normalized, normalized)
+      labels_prefix <> base
     end
   end
 
