@@ -86,6 +86,33 @@ defmodule SymphonyElixir.CoreTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "123")
     assert {:error, {:unsupported_tracker_kind, "123"}} = Config.validate!()
+
+    # github tracker requires repo + api_key
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_api_token: nil,
+      tracker_project_slug: nil
+    )
+
+    assert {:error, :missing_github_api_token} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_api_token: "ghp_x",
+      tracker_project_slug: nil,
+      tracker_repo: nil
+    )
+
+    assert {:error, :missing_github_repo} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_api_token: "ghp_x",
+      tracker_project_slug: nil,
+      tracker_repo: "owner/repo"
+    )
+
+    assert :ok = Config.validate!()
   end
 
   test "current WORKFLOW.md file is valid and complete" do
