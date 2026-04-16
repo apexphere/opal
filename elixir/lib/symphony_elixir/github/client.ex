@@ -415,8 +415,6 @@ defmodule SymphonyElixir.Github.Client do
     end
   end
 
-  defp check_rate_limit(_), do: :ok
-
   defp github_error_context(%{body: body}) do
     " body=" <> summarize_error_body(body)
   end
