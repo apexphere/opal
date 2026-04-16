@@ -113,9 +113,9 @@ defmodule SymphonyElixir.CLI do
   @spec acknowledgement_banner() :: String.t()
   defp acknowledgement_banner do
     lines = [
-      "This Symphony implementation is a low key engineering preview.",
-      "Codex will run without any guardrails.",
-      "SymphonyElixir is not a supported product and is presented as-is.",
+      "Opal is a low key engineering preview.",
+      "The configured agent runtime will run without any guardrails.",
+      "Opal is not a supported product and is presented as-is.",
       "To proceed, start with `--i-understand-that-this-will-be-running-without-the-usual-guardrails` CLI argument"
     ]
 
