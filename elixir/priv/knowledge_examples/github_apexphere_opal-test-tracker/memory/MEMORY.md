@@ -1,0 +1,1 @@
+- [Label semantics](label_semantics.md) — state machine via label swaps, not a `state` field
