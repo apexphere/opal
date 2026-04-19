@@ -8,6 +8,7 @@ defmodule SymphonyElixir.PromptBuilder do
   """
 
   alias SymphonyElixir.{Config, Workflow}
+  alias SymphonyElixir.Verification.Feedback
 
   @render_opts [strict_variables: true, strict_filters: true]
 
@@ -83,12 +84,25 @@ defmodule SymphonyElixir.PromptBuilder do
       )
       |> IO.iodata_to_binary()
 
-    append_verification_instruction(rendered)
+    rendered
+    |> append_verification_instruction()
+    |> append_verification_feedback(Keyword.get(opts, :workspace))
   end
 
   defp append_verification_instruction(rendered) do
     if Config.settings!().verification.enabled do
       rendered <> "\n\n" <> @verification_instruction
+    else
+      rendered
+    end
+  end
+
+  defp append_verification_feedback(rendered, workspace) do
+    if Config.settings!().verification.enabled do
+      case Feedback.render(workspace) do
+        {:ok, block} -> rendered <> "\n\n" <> block
+        :none -> rendered
+      end
     else
       rendered
     end
