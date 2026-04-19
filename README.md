@@ -10,6 +10,8 @@ extended with:
 - **GitHub Issues** as the task source (replacing Linear)
 - **Claude Code** (`claude -p`) as the agent runtime (replacing Codex)
 - **Project-adaptive prompts** that read your project's own CLAUDE.md / README and follow them
+- **Per-project knowledge** — Opal accumulates experience knowledge per target project and injects
+  it into each agent run, without polluting the target repo
 - **Docker packaging** for drop-in use with any codebase
 
 > [!WARNING]
@@ -42,6 +44,8 @@ The codebase is forked from [openai/symphony](https://github.com/openai/symphony
 
 - **Orchestrator** — GenServer polling loop with concurrency, retries, and reconciliation
 - **Workspace manager** — per-issue isolation with lifecycle hooks
+- **Knowledge subsystem** — per-project experience knowledge, filesystem-backed by default,
+  dynamically injected into each agent run (see SPEC §9.6)
 - **Prompt builder** — Liquid template rendering with task context
 - **Observability** — terminal dashboard + Phoenix LiveView UI
 - **SPEC.md** — language-agnostic specification for building your own

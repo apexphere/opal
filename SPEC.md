@@ -897,6 +897,38 @@ Invariant 3: Workspace key is sanitized.
 - Only `[A-Za-z0-9._-]` allowed in workspace directory names.
 - Replace all other characters with `_`.
 
+### 9.6 Project Knowledge Injection (Optional)
+
+Implementations MAY inject per-project experience knowledge into the workspace
+before the coding-agent subprocess is launched. The purpose is to give the
+agent accumulated learnings about the target project (gotchas, conventions,
+curated skills) without the target repository itself having to hold
+Opal-authored artifacts.
+
+Injection contract:
+
+- Knowledge is keyed by a stable `project_key` derived from existing config
+  (e.g. `<kind>_<owner>_<repo>` for GitHub trackers).
+- Knowledge is stored by Opal, outside the target repo. A `knowledge_root`
+  location holds one directory per `project_key`.
+- Each project directory MAY contain:
+  - `CLAUDE.md` — always-loaded index.
+  - `skills/<name>/SKILL.md` — on-demand procedural skills (loaded by the
+    coding agent's native description-match mechanism).
+  - `memory/<topic>.md` — accumulated topical learnings.
+- Before the agent runs, the implementation copies the project's tree into the
+  workspace under `<workspace>/.claude/` and ensures `<workspace>/CLAUDE.md`
+  imports the project index via `@.claude/opal-knowledge.md`.
+- If the target repository already contains a `CLAUDE.md`, implementations
+  MUST NOT overwrite it. The import line is appended instead.
+- Injection MUST be idempotent — re-running on the same workspace produces the
+  same final state without duplicating imports.
+- When the knowledge tree is empty for a `project_key`, injection is a no-op.
+
+Storage backend is pluggable. Implementations SHOULD ship a filesystem backend
+by default and MAY layer git-backed, database-backed, or object-storage
+backends on top of the same boundary.
+
 ## 10. Agent Runner Protocol (Coding Agent Integration)
 
 This section defines the language-neutral contract for integrating a coding agent app-server.
