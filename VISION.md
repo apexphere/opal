@@ -1,8 +1,8 @@
 # Vision
 
-**Opal makes Claude Code trustworthy enough to walk away from.** It verifies its own work, remembers the project across weeks, and runs on a subscription instead of an API bill.
+**Opal makes Claude Code trustworthy enough to walk away from.** It verifies its own work, learns the project across weeks, and runs on a subscription instead of an API bill.
 
-This document is the north star for Opal's development. When scoping a feature, ask which pillar it serves. Proposals that don't serve self-verifying, self-remembering, or subscription-native are probably not vision-critical.
+This document is the north star for Opal's development. When scoping a feature, ask which pillar it serves. Proposals that don't serve self-verifying, self-learning, or subscription-native are probably not vision-critical.
 
 ## Customer
 
@@ -13,7 +13,7 @@ A solo developer on a Claude Max subscription. One person, many projects over a 
 Today, using Claude Code means paying two taxes:
 
 - **Verification tax** — re-checking every claimed completion, because CC never tests its own work.
-- **Re-orientation tax** — re-briefing the agent after every break, because the agent has no memory of what it's been doing for the last few weeks.
+- **Re-orientation tax** — re-briefing the agent after every break, because the agent never learns your project. Every session starts fresh.
 
 Opal removes both. The developer walks away, comes back, asks *"where are we at, what's next?"*, steers the day's goal, and lets it work.
 
@@ -35,15 +35,19 @@ If Opal built the thing, it knows how to use the thing — that knowledge is a b
 
 This is the cash-out gate for the other two pillars: remembered context + cheap autonomy + unverified output = fast broken code.
 
-### 2. Self-remembering
+### 2. Self-learning
 
-A per-project domain wiki that grows with every run.
+Opal gets better at your project by working on it.
 
 > Knowledge needs to grow, settle, and refine. Do not think knowledge is plain memory.
 
 Karpathy's LLM wiki pattern is the compass: compile knowledge once, keep it current, maintain through review rather than re-derive per query. Treat it as guidance for direction, not a blueprint for implementation.
 
-The auto-curator is the maintenance engine and the real self-evolution loop — the wiki only compounds if something keeps it current without the human writing every entry.
+Every run produces signal — what the agent tried, what verification caught, what the human corrected. A curator distills that signal into a living per-project knowledge layer: domain facts, codebase idioms, and behavioural guidance. The next run reads the current layer before acting.
+
+Self-verifying is the teacher. Self-learning is the student. The loop is the product.
+
+The auto-curator is the distillation engine and the real self-evolution loop. Without it the layer accumulates noise; with it, competence compounds. Not model-level learning — no fine-tuning, no weight updates. All learning lives in the knowledge layer, which is readable, editable, and per-project.
 
 ### 3. Subscription-native
 
@@ -53,7 +57,7 @@ Wrapping the CLI — not the API — is the economic moat. This is not generic "
 
 ## Self-evolving
 
-Intelligence compounds in the **wiki**, not in the orchestrator. Logic stays static; the knowledge layer grows, settles, refines. An older Opal on a project is a smarter Opal on that project — because the wiki is denser.
+Competence compounds in the **knowledge layer**, not in the orchestrator. Logic stays static; the layer grows, settles, refines. An older Opal on a project is a smarter Opal on that project — because the layer is denser *and* more distilled.
 
 Per-project. No cross-project contamination — domains contaminate each other.
 
@@ -75,4 +79,4 @@ Opal maintains a standing narrative — status + plan — that the human steers 
 
 ## One-line compression
 
-Opal turns a coding agent from a fresh-start tool into a long-lived, self-verifying domain operator — one per project, for the life of the project.
+Opal turns a coding agent from a fresh-start tool into a long-lived domain operator that verifies its own work and learns the project — one per project, for the life of the project.

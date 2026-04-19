@@ -20,7 +20,7 @@ extended with:
 ## Vision
 
 See [VISION.md](VISION.md) — what Opal is, who it's for, and the three pillars
-(self-verifying, self-remembering, subscription-native) that guide development.
+(self-verifying, self-learning, subscription-native) that guide development.
 
 ## Quickstart
 
