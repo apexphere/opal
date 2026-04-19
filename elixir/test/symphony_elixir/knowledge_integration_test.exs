@@ -1,6 +1,100 @@
 defmodule SymphonyElixir.KnowledgeIntegrationTest do
   use SymphonyElixir.TestSupport
 
+  defmodule FakeFailingStore do
+    @behaviour SymphonyElixir.Knowledge.Store
+
+    @impl true
+    def load(_root, _project_key), do: {:error, :store_unavailable}
+
+    @impl true
+    def write(_root, _project_key, _path, _content), do: :ok
+
+    @impl true
+    def list_projects(_root), do: {:ok, []}
+  end
+
+  defmodule FakeEchoStore do
+    @behaviour SymphonyElixir.Knowledge.Store
+
+    @impl true
+    def load(root, project_key),
+      do: {:ok, %{files: %{"echo" => "root=#{root} key=#{project_key}"}}}
+
+    @impl true
+    def write(_root, _project_key, _path, _content), do: :ok
+
+    @impl true
+    def list_projects(_root), do: {:ok, []}
+  end
+
+  defp with_store_module(module, fun) do
+    Application.put_env(:symphony_elixir, :knowledge_store_module, module)
+
+    try do
+      fun.()
+    after
+      Application.delete_env(:symphony_elixir, :knowledge_store_module)
+    end
+  end
+
+  test "Knowledge.inject/2 returns the store error and logs when load fails" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "opal-knowledge-inject-err-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(test_root)
+    on_exit(fn -> File.rm_rf(test_root) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_repo: "apexphere/opal-test-tracker",
+      knowledge_root: Path.join(test_root, "knowledge")
+    )
+
+    workspace = Path.join(test_root, "workspace")
+    File.mkdir_p!(workspace)
+
+    log =
+      capture_log(fn ->
+        assert {:error, :store_unavailable} =
+                 with_store_module(FakeFailingStore, fn ->
+                   SymphonyElixir.Knowledge.inject(workspace, "github_some_project")
+                 end)
+      end)
+
+    assert log =~ "Knowledge load failed"
+    assert log =~ "github_some_project"
+  end
+
+  test "Knowledge.load/1 delegates to the configured store" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "opal-knowledge-load-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(test_root)
+    on_exit(fn -> File.rm_rf(test_root) end)
+
+    knowledge_root = Path.join(test_root, "knowledge")
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_repo: "apexphere/opal-test-tracker",
+      knowledge_root: knowledge_root
+    )
+
+    assert {:ok, %{files: files}} =
+             with_store_module(FakeEchoStore, fn ->
+               SymphonyElixir.Knowledge.load("github_some_project")
+             end)
+
+    assert files["echo"] == "root=#{knowledge_root} key=github_some_project"
+  end
+
   test "workspace creation injects seeded project knowledge into .claude/" do
     test_root =
       Path.join(
