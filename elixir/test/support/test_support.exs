@@ -135,6 +135,9 @@ defmodule SymphonyElixir.TestSupport do
           server_host: nil,
           knowledge_backend: nil,
           knowledge_root: nil,
+          verification_enabled: nil,
+          verification_required: nil,
+          verification_step_timeout_ms: nil,
           prompt: @workflow_prompt
         ],
         overrides
@@ -183,6 +186,9 @@ defmodule SymphonyElixir.TestSupport do
     server_host = Keyword.get(config, :server_host)
     knowledge_backend = Keyword.get(config, :knowledge_backend)
     knowledge_root = Keyword.get(config, :knowledge_root)
+    verification_enabled = Keyword.get(config, :verification_enabled)
+    verification_required = Keyword.get(config, :verification_required)
+    verification_step_timeout_ms = Keyword.get(config, :verification_step_timeout_ms)
     prompt = Keyword.get(config, :prompt)
 
     sections =
@@ -228,6 +234,7 @@ defmodule SymphonyElixir.TestSupport do
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
         knowledge_yaml(knowledge_backend, knowledge_root),
+        verification_yaml(verification_enabled, verification_required, verification_step_timeout_ms),
         "---",
         prompt
       ]
@@ -319,6 +326,19 @@ defmodule SymphonyElixir.TestSupport do
       root && "  root: #{yaml_value(root)}"
     ]
     |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp verification_yaml(nil, nil, nil), do: nil
+
+  defp verification_yaml(enabled, required, step_timeout_ms) do
+    [
+      "verification:",
+      !is_nil(enabled) && "  enabled: #{yaml_value(enabled)}",
+      !is_nil(required) && "  required: #{yaml_value(required)}",
+      !is_nil(step_timeout_ms) && "  step_timeout_ms: #{yaml_value(step_timeout_ms)}"
+    ]
+    |> Enum.reject(&(&1 in [nil, false]))
     |> Enum.join("\n")
   end
 

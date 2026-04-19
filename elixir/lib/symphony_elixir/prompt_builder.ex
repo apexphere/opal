@@ -11,6 +11,36 @@ defmodule SymphonyElixir.PromptBuilder do
 
   @render_opts [strict_variables: true, strict_filters: true]
 
+  @verification_instruction """
+  ## Verification step (required before declaring done)
+
+  Before you mark this task as complete, write a verification recipe to
+  `.opal/verify.json` describing how to exercise the changes you made the way a
+  user would. Opal will execute every step and revert the issue to active if
+  any step fails.
+
+  Schema (v1):
+
+      {
+        "version": "1",
+        "description": "<one-line summary of what to exercise>",
+        "steps": [
+          {
+            "name": "<short step label>",
+            "shell": "<bash command run from the workspace root>",
+            "expect_exit": 0
+          }
+        ]
+      }
+
+  Each step's `shell` runs via `bash -lc` with the workspace as the working
+  directory. A step passes when its exit code matches `expect_exit` (default 0).
+  Steps run sequentially and stop on the first failure. Pick the smallest set
+  of steps that prove the user-visible behaviour you delivered actually works —
+  boot the thing, hit it the way a user would, check the response. Unit tests
+  are not enough.
+  """
+
   @spec build_prompt(SymphonyElixir.Linear.Issue.t(), keyword()) :: String.t()
   def build_prompt(issue, opts \\ []) do
     template =
@@ -21,16 +51,27 @@ defmodule SymphonyElixir.PromptBuilder do
     issue_map = issue |> Map.from_struct() |> to_solid_map()
     task_map = Map.put(issue_map, "number", Map.get(issue_map, "identifier"))
 
-    template
-    |> Solid.render!(
-      %{
-        "attempt" => Keyword.get(opts, :attempt),
-        "issue" => issue_map,
-        "task" => task_map
-      },
-      @render_opts
-    )
-    |> IO.iodata_to_binary()
+    rendered =
+      template
+      |> Solid.render!(
+        %{
+          "attempt" => Keyword.get(opts, :attempt),
+          "issue" => issue_map,
+          "task" => task_map
+        },
+        @render_opts
+      )
+      |> IO.iodata_to_binary()
+
+    append_verification_instruction(rendered)
+  end
+
+  defp append_verification_instruction(rendered) do
+    if Config.settings!().verification.enabled do
+      rendered <> "\n\n" <> @verification_instruction
+    else
+      rendered
+    end
   end
 
   defp prompt_template!({:ok, %{prompt_template: prompt}}), do: default_prompt(prompt)
