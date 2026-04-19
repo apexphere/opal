@@ -116,5 +116,10 @@ defmodule SymphonyElixir.KnowledgeTest do
       tracker = %{kind: "github", repo: "owner/repo with spaces", project_slug: nil}
       assert Knowledge.project_key_for(tracker) == "github_owner_repo_with_spaces"
     end
+
+    test "unrecognized kind falls back to unknown slug" do
+      tracker = %{kind: "jira", repo: nil, project_slug: nil}
+      assert Knowledge.project_key_for(tracker) == "jira_unknown"
+    end
   end
 end

@@ -33,6 +33,13 @@ defmodule SymphonyElixir.Knowledge.Store.FilesystemTest do
 
       assert {:ok, []} = Filesystem.list_projects(missing)
     end
+
+    test "propagates filesystem errors other than :enoent", %{root: root} do
+      file_as_root = Path.join(root, "not-a-dir")
+      File.write!(file_as_root, "this is a file, not a directory\n")
+
+      assert {:error, :enotdir} = Filesystem.list_projects(file_as_root)
+    end
   end
 
   describe "load/2" do

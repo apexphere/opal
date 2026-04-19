@@ -130,12 +130,7 @@ defmodule SymphonyElixir.Knowledge do
     case Application.get_env(:symphony_elixir, :knowledge_store_module) do
       nil ->
         case Config.settings!().knowledge.backend do
-          "filesystem" ->
-            SymphonyElixir.Knowledge.Store.Filesystem
-
-          other ->
-            raise ArgumentError,
-                  "unsupported knowledge backend #{inspect(other)} — schema validation should have prevented this"
+          "filesystem" -> SymphonyElixir.Knowledge.Store.Filesystem
         end
 
       mod when is_atom(mod) ->
