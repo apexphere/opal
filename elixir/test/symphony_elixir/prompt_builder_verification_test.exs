@@ -26,6 +26,33 @@ defmodule SymphonyElixir.PromptBuilderVerificationTest do
     assert prompt =~ "expect_exit"
   end
 
+  test "verification instruction forbids language test runners as recipe steps" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      verification_enabled: true,
+      prompt: "TASK {{ task.number }}"
+    )
+
+    prompt = PromptBuilder.build_prompt(@issue)
+
+    assert prompt =~ "Recipe steps MUST exercise the delivered interface"
+    assert prompt =~ "mix test"
+    assert prompt =~ "pytest"
+    assert prompt =~ "go test"
+    assert prompt =~ "npm test"
+  end
+
+  test "verification instruction warns that .opal/ is workspace-only" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      verification_enabled: true,
+      prompt: "TASK {{ task.number }}"
+    )
+
+    prompt = PromptBuilder.build_prompt(@issue)
+
+    assert prompt =~ "`.opal/` is workspace-only"
+    assert prompt =~ "never commit"
+  end
+
   test "omits the verification instruction when verification.enabled is false" do
     write_workflow_file!(Workflow.workflow_file_path(),
       verification_enabled: false,
