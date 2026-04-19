@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Workspace do
   """
 
   require Logger
-  alias SymphonyElixir.{Config, PathSafety, SSH}
+  alias SymphonyElixir.{Config, Knowledge, PathSafety, SSH}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
 
@@ -21,7 +21,8 @@ defmodule SymphonyElixir.Workspace do
       with {:ok, workspace} <- workspace_path_for_issue(safe_id, worker_host),
            :ok <- validate_workspace_path(workspace, worker_host),
            {:ok, workspace, created?} <- ensure_workspace(workspace, worker_host),
-           :ok <- maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
+           :ok <- maybe_run_after_create_hook(workspace, issue_context, created?, worker_host),
+           :ok <- maybe_inject_knowledge(workspace, worker_host) do
         {:ok, workspace}
       end
     rescue
@@ -205,6 +206,25 @@ defmodule SymphonyElixir.Workspace do
 
   defp safe_identifier(identifier) do
     String.replace(identifier || "issue", ~r/[^a-zA-Z0-9._-]/, "_")
+  end
+
+  defp maybe_inject_knowledge(_workspace, worker_host) when is_binary(worker_host) do
+    Logger.info("Skipping knowledge injection on remote worker worker_host=#{worker_host}")
+    :ok
+  end
+
+  defp maybe_inject_knowledge(workspace, nil) do
+    project_key = Knowledge.project_key()
+
+    case Knowledge.inject(workspace, project_key) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Knowledge injection failed workspace=#{workspace} project_key=#{project_key} reason=#{inspect(reason)}")
+
+        :ok
+    end
   end
 
   defp maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
