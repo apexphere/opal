@@ -293,6 +293,31 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
+  defmodule Knowledge do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @default_root Path.join(System.tmp_dir!(), "opal_knowledge")
+
+    @spec default_root() :: String.t()
+    def default_root, do: @default_root
+
+    @primary_key false
+    embedded_schema do
+      field(:backend, :string, default: "filesystem")
+      field(:root, :string, default: @default_root)
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [:backend, :root], empty_values: [])
+      |> validate_inclusion(:backend, ["filesystem"])
+      |> validate_required([:root])
+    end
+  end
+
   embedded_schema do
     embeds_one(:tracker, Tracker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:polling, Polling, on_replace: :update, defaults_to_struct: true)
@@ -304,6 +329,7 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:knowledge, Knowledge, on_replace: :update, defaults_to_struct: true)
   end
 
   @spec parse(map()) :: {:ok, %__MODULE__{}} | {:error, {:invalid_workflow_config, String.t()}}
@@ -397,6 +423,7 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
+    |> cast_embed(:knowledge, with: &Knowledge.changeset/2)
   end
 
   defp finalize_settings(settings) do
@@ -418,13 +445,18 @@ defmodule SymphonyElixir.Config.Schema do
       | root: resolve_path_value(settings.workspace.root, Path.join(System.tmp_dir!(), "symphony_workspaces"))
     }
 
+    knowledge = %{
+      settings.knowledge
+      | root: resolve_path_value(settings.knowledge.root, Knowledge.default_root())
+    }
+
     codex = %{
       settings.codex
       | approval_policy: normalize_keys(settings.codex.approval_policy),
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex}
+    %{settings | tracker: tracker, workspace: workspace, codex: codex, knowledge: knowledge}
   end
 
   defp normalize_keys(value) when is_map(value) do
