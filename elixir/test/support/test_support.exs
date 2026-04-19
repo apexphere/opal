@@ -133,6 +133,8 @@ defmodule SymphonyElixir.TestSupport do
           observability_render_interval_ms: 16,
           server_port: nil,
           server_host: nil,
+          knowledge_backend: nil,
+          knowledge_root: nil,
           prompt: @workflow_prompt
         ],
         overrides
@@ -179,6 +181,8 @@ defmodule SymphonyElixir.TestSupport do
     observability_render_interval_ms = Keyword.get(config, :observability_render_interval_ms)
     server_port = Keyword.get(config, :server_port)
     server_host = Keyword.get(config, :server_host)
+    knowledge_backend = Keyword.get(config, :knowledge_backend)
+    knowledge_root = Keyword.get(config, :knowledge_root)
     prompt = Keyword.get(config, :prompt)
 
     sections =
@@ -223,6 +227,7 @@ defmodule SymphonyElixir.TestSupport do
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
+        knowledge_yaml(knowledge_backend, knowledge_root),
         "---",
         prompt
       ]
@@ -300,6 +305,18 @@ defmodule SymphonyElixir.TestSupport do
       "server:",
       port && "  port: #{yaml_value(port)}",
       host && "  host: #{yaml_value(host)}"
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp knowledge_yaml(nil, nil), do: nil
+
+  defp knowledge_yaml(backend, root) do
+    [
+      "knowledge:",
+      backend && "  backend: #{yaml_value(backend)}",
+      root && "  root: #{yaml_value(root)}"
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
