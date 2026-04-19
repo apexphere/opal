@@ -6,7 +6,7 @@ defmodule SymphonyElixir.AgentRunner do
   require Logger
   alias SymphonyElixir.ClaudeCode.Runner, as: ClaudeCodeRunner
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
+  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Verification, Workspace}
 
   @type worker_host :: String.t() | nil
 
@@ -138,8 +138,8 @@ defmodule SymphonyElixir.AgentRunner do
 
           :ok
 
-        {:done, _refreshed_issue} ->
-          :ok
+        {:done, refreshed_issue} ->
+          handle_done(workspace, refreshed_issue)
 
         {:error, reason} ->
           {:error, reason}
@@ -183,13 +183,66 @@ defmodule SymphonyElixir.AgentRunner do
 
           :ok
 
-        {:done, _refreshed_issue} ->
-          :ok
+        {:done, refreshed_issue} ->
+          handle_done(workspace, refreshed_issue)
 
         {:error, reason} ->
           {:error, reason}
       end
     end
+  end
+
+  defp handle_done(workspace, issue) do
+    settings = Config.settings!().verification
+
+    if settings.enabled do
+      run_verification(workspace, issue)
+    else
+      :ok
+    end
+  end
+
+  defp run_verification(workspace, issue) do
+    settings = Config.settings!().verification
+    outcome = Verification.verify(workspace, settings)
+
+    Logger.info("Verification #{outcome.status} for #{issue_context(issue)} workspace=#{workspace} steps=#{length(outcome.steps)}")
+
+    case outcome.status do
+      :pass ->
+        :ok
+
+      :skipped ->
+        :ok
+
+      :fail ->
+        revert_issue_state(issue, outcome)
+        :ok
+    end
+  end
+
+  defp revert_issue_state(%Issue{id: issue_id}, outcome) when is_binary(issue_id) do
+    active_states = Config.settings!().tracker.active_states
+
+    case List.last(active_states) do
+      nil ->
+        Logger.warning("Verification failed for issue_id=#{issue_id} but no active_states configured; cannot revert")
+
+      target_state ->
+        case Tracker.update_issue_state(issue_id, target_state) do
+          :ok ->
+            Logger.info("Verification reverted issue_id=#{issue_id} to state=#{target_state} (failed steps=#{failed_step_count(outcome)})")
+
+          {:error, reason} ->
+            Logger.warning("Verification revert failed issue_id=#{issue_id} target_state=#{target_state} reason=#{inspect(reason)}")
+        end
+    end
+  end
+
+  defp revert_issue_state(_issue, _outcome), do: :ok
+
+  defp failed_step_count(%{steps: steps}) do
+    Enum.count(steps, fn step -> not step.passed end)
   end
 
   defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)

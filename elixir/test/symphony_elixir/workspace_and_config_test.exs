@@ -1299,4 +1299,30 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       File.rm_rf(test_root)
     end
   end
+
+  test "schema parses verification config with custom values" do
+    assert {:ok, settings} =
+             Schema.parse(%{
+               verification: %{enabled: true, required: true, step_timeout_ms: 30_000}
+             })
+
+    assert settings.verification.enabled == true
+    assert settings.verification.required == true
+    assert settings.verification.step_timeout_ms == 30_000
+  end
+
+  test "schema defaults verification to disabled with 10-minute timeout" do
+    assert {:ok, settings} = Schema.parse(%{})
+
+    assert settings.verification.enabled == false
+    assert settings.verification.required == false
+    assert settings.verification.step_timeout_ms == 600_000
+  end
+
+  test "schema rejects non-positive verification step_timeout_ms" do
+    assert {:error, {:invalid_workflow_config, message}} =
+             Schema.parse(%{verification: %{step_timeout_ms: 0}})
+
+    assert message =~ "verification.step_timeout_ms"
+  end
 end
