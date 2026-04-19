@@ -1,0 +1,11 @@
+{
+  "version": "1",
+  "description": "Verify /healthz returns 200 when orchestrator is running and 503 when stopped",
+  "steps": [
+    {
+      "name": "healthz endpoint exercises both orchestrator states",
+      "shell": "cd elixir && mix test test/symphony_elixir/healthz_api_test.exs 2>&1 | tail -5",
+      "expect_exit": 0
+    }
+  ]
+}

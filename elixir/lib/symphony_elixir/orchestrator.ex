@@ -1074,6 +1074,17 @@ defmodule SymphonyElixir.Orchestrator do
     )
   end
 
+  @spec alive?() :: boolean()
+  def alive?, do: alive?(__MODULE__)
+
+  @spec alive?(GenServer.server()) :: boolean()
+  def alive?(server) do
+    case Process.whereis(server) do
+      pid when is_pid(pid) -> Process.alive?(pid)
+      nil -> false
+    end
+  end
+
   @spec request_refresh() :: map() | :unavailable
   def request_refresh do
     request_refresh(__MODULE__)

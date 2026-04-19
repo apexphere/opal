@@ -8,6 +8,17 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   alias Plug.Conn
   alias SymphonyElixirWeb.{Endpoint, Presenter}
 
+  @spec healthz(Conn.t(), map()) :: Conn.t()
+  def healthz(conn, _params) do
+    if SymphonyElixir.Orchestrator.alive?(orchestrator()) do
+      json(conn, %{status: "ok", orchestrator: "running"})
+    else
+      conn
+      |> put_status(503)
+      |> json(%{status: "degraded", orchestrator: "stopped"})
+    end
+  end
+
   @spec state(Conn.t(), map()) :: Conn.t()
   def state(conn, _params) do
     json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms()))
