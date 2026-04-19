@@ -4,6 +4,10 @@ defmodule SymphonyElixir.Verification.RecipeTest do
   alias SymphonyElixir.Verification.Recipe
   alias SymphonyElixir.Verification.Recipe.Step
 
+  test "rel_path points at .opal/verify.json" do
+    assert Recipe.rel_path() == ".opal/verify.json"
+  end
+
   describe "parse/1" do
     test "parses a single-step recipe with defaults" do
       json =
@@ -57,6 +61,21 @@ defmodule SymphonyElixir.Verification.RecipeTest do
       assert {:error, {:invalid_recipe, {:step, 1, :missing_shell}}} =
                Recipe.parse(Jason.encode!(%{"steps" => [%{"name" => "x"}]}))
     end
+
+    test "rejects non-object step entries" do
+      assert {:error, {:invalid_recipe, {:step, 1, :not_an_object}}} =
+               Recipe.parse(Jason.encode!(%{"steps" => [42]}))
+    end
+
+    test "rejects steps that are not a list" do
+      assert {:error, {:invalid_recipe, :steps_not_a_list}} =
+               Recipe.parse(Jason.encode!(%{"steps" => "nope"}))
+    end
+
+    test "falls back to expect_exit 0 when value is not an integer" do
+      json = Jason.encode!(%{"steps" => [%{"shell" => "true", "expect_exit" => "boom"}]})
+      assert {:ok, %Recipe{steps: [%Step{expect_exit: 0}]}} = Recipe.parse(json)
+    end
   end
 
   describe "read/1" do
@@ -82,6 +101,12 @@ defmodule SymphonyElixir.Verification.RecipeTest do
       )
 
       assert {:ok, %Recipe{steps: [%Step{name: "ping"}]}} = Recipe.read(workspace)
+    end
+
+    test "surfaces non-enoent read errors as invalid_recipe", %{workspace: workspace} do
+      File.write!(Path.join(workspace, ".opal"), "")
+
+      assert {:error, {:invalid_recipe, {:read_failed, _}}} = Recipe.read(workspace)
     end
   end
 end

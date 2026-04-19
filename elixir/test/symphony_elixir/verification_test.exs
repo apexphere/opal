@@ -104,6 +104,21 @@ defmodule SymphonyElixir.VerificationTest do
     assert output =~ "hello"
   end
 
+  test "log_rel_path points at .opal/verify-log.json" do
+    assert Verification.log_rel_path() == ".opal/verify-log.json"
+  end
+
+  test "swallows persist-log failures so verification still returns an outcome",
+       %{workspace: workspace} do
+    File.write!(Path.join(workspace, ".opal"), "")
+
+    outcome = Verification.verify(workspace, settings())
+
+    assert outcome.status == :fail
+    assert {:invalid_recipe, {:read_failed, _}} = outcome.skipped_reason
+    refute File.exists?(Path.join(workspace, ".opal/verify-log.json"))
+  end
+
   test "uses a pluggable executor when configured", %{workspace: workspace} do
     defmodule FakeExecutor do
       @behaviour SymphonyElixir.Verification.Executor
@@ -125,5 +140,17 @@ defmodule SymphonyElixir.VerificationTest do
     assert outcome.status == :pass
     assert [%{name: "via-fake", output: "fake-output"}] = outcome.steps
     assert_received {:fake_executed, "via-fake"}
+  end
+
+  test "bash executor records :timeout exit when step exceeds timeout", %{workspace: workspace} do
+    write_recipe!(workspace, [%{"name" => "slow", "shell" => "sleep 2"}])
+
+    outcome = Verification.verify(workspace, settings(step_timeout_ms: 50))
+
+    assert outcome.status == :fail
+    assert [%{name: "slow", passed: false, exit: :timeout}] = outcome.steps
+
+    log = Path.join(workspace, ".opal/verify-log.json") |> File.read!() |> Jason.decode!()
+    assert [%{"exit" => "timeout"}] = log["steps"]
   end
 end
