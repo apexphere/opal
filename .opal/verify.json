@@ -1,0 +1,36 @@
+{
+  "version": "1",
+  "description": "Boot Phoenix endpoint and verify GET /healthz returns {\"status\":\"ok\"} with Content-Type application/json",
+  "steps": [
+    {
+      "name": "compile",
+      "shell": "cd elixir && MIX_ENV=test mix compile 2>&1",
+      "expect_exit": 0
+    },
+    {
+      "name": "start-server",
+      "shell": "cd elixir && MIX_ENV=test nohup mix run --no-start ../.opal/healthz_server.exs > /tmp/opal_healthz.log 2>&1 & SERVER_PID=$!; disown $SERVER_PID; echo $SERVER_PID > /tmp/opal_healthz_pid.txt; for i in $(seq 1 30); do curl -fs http://localhost:41777/healthz > /dev/null 2>&1 && exit 0; sleep 1; done; cat /tmp/opal_healthz.log >&2; exit 1",
+      "expect_exit": 0
+    },
+    {
+      "name": "curl-healthz",
+      "shell": "curl -fsS http://localhost:41777/healthz",
+      "expect_exit": 0
+    },
+    {
+      "name": "check-json",
+      "shell": "curl -s http://localhost:41777/healthz | grep -F '{\"status\":\"ok\"}'",
+      "expect_exit": 0
+    },
+    {
+      "name": "check-content-type",
+      "shell": "curl -sI http://localhost:41777/healthz | grep -i 'content-type' | grep -i 'application/json'",
+      "expect_exit": 0
+    },
+    {
+      "name": "stop-server",
+      "shell": "kill $(cat /tmp/opal_healthz_pid.txt) 2>/dev/null; true",
+      "expect_exit": 0
+    }
+  ]
+}
