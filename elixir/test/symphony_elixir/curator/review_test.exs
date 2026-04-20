@@ -226,6 +226,16 @@ defmodule SymphonyElixir.Curator.ReviewTest do
       refute Wiki.exists?(ctx.project_key, "alpha")
     end
 
+    test "stdin EOF collapses to quit so Ctrl-D terminates the prompt cleanly", ctx do
+      proposal = Proposal.create(build_entry("alpha", "body"), "rationale")
+
+      capture_io("", fn ->
+        assert :quit = Review.run(proposal, ctx.project_key, io: CapturingIO)
+      end)
+
+      refute Wiki.exists?(ctx.project_key, "alpha")
+    end
+
     test "falls back to an identity editor_fun on edit-then-accept", ctx do
       proposal = Proposal.create(build_entry("alpha", "# orig\n"), "rationale")
 

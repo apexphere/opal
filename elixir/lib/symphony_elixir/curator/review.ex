@@ -178,8 +178,8 @@ defmodule SymphonyElixir.Curator.Review do
 
   defp default_gets(prompt) do
     case IO.gets(prompt) do
-      data when is_binary(data) -> data
-      _ -> ""
+      line when is_binary(line) -> line
+      _ -> "q\n"
     end
   end
 
