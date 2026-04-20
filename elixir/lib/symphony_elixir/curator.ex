@@ -40,16 +40,22 @@ defmodule SymphonyElixir.Curator do
 
   @spec learn(Path.t(), opts()) :: result()
   def learn(article_path, opts \\ []) when is_binary(article_path) do
+    with {:ok, raw_body} <- File.read(article_path),
+         :ok <- check_size(raw_body) do
+      source_ref = Keyword.get(opts, :source_ref, article_path)
+      do_learn(raw_body, Keyword.put(opts, :source_ref, source_ref))
+    end
+  end
+
+  defp do_learn(raw_body, opts) when is_binary(raw_body) do
     project_key = Keyword.fetch!(opts, :project_key)
-    source_ref = Keyword.get(opts, :source_ref, article_path)
+    source_ref = Keyword.fetch!(opts, :source_ref)
     distiller = Keyword.get(opts, :distiller, default_distiller())
     critic = Keyword.get(opts, :critic, default_critic())
     now_fun = Keyword.get(opts, :now, &iso8601_now/0)
     now = now_fun.()
 
-    with {:ok, raw_body} <- File.read(article_path),
-         :ok <- check_size(raw_body),
-         {:ok, summaries} <- Wiki.list_summaries(project_key),
+    with {:ok, summaries} <- Wiki.list_summaries(project_key),
          capped_summaries <- maybe_filter_summaries(summaries, raw_body),
          {:ok, candidates} <- load_candidates(project_key, raw_body, capped_summaries),
          input <- %{body: raw_body, source_ref: source_ref, ingested_at: now},
