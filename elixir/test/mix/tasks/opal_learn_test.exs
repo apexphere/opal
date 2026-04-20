@@ -97,4 +97,58 @@ defmodule Mix.Tasks.Opal.LearnTest do
 
     assert output =~ "Curator failed"
   end
+
+  test "without --auto-accept drops into the interactive Review (fed via stdin)", ctx do
+    Application.put_env(
+      :symphony_elixir,
+      :curator_stub_response,
+      {:create,
+       %{
+         "slug" => "interactive-thing",
+         "title" => "Interactive",
+         "topic" => "topic",
+         "body" => "body\n"
+       }}
+    )
+
+    # "r\n" rejects at the Review prompt — exercises the non-auto-accept
+    # branch (Review.run/2) without writing the entry.
+    output =
+      capture_io("r\n", fn ->
+        Learn.run([ctx.article_path, "--project", "github_apexphere_opal-learn-task"])
+      end)
+
+    assert output =~ "CREATE interactive-thing"
+    refute SymphonyElixir.Wiki.exists?("github_apexphere_opal-learn-task", "interactive-thing")
+  end
+
+  test "formats a REFINE decision", ctx do
+    # Seed the refine target so curator's sanitize_proposal accepts it.
+    :ok =
+      SymphonyElixir.Wiki.put(
+        "github_apexphere_opal-learn-task",
+        %SymphonyElixir.Wiki.Entry{
+          slug: "auth-tokens",
+          title: "Auth tokens",
+          topic: "security",
+          revision: 1,
+          created_at: "2026-04-20T00:00:00Z",
+          updated_at: "2026-04-20T00:00:00Z",
+          body: "# v1\n\nold body\n"
+        }
+      )
+
+    Application.put_env(
+      :symphony_elixir,
+      :curator_stub_response,
+      {:refine, "auth-tokens", "# v2\n\nmerged\n"}
+    )
+
+    output =
+      capture_io(fn ->
+        Learn.run([ctx.article_path, "--project", "github_apexphere_opal-learn-task", "--auto-accept"])
+      end)
+
+    assert output =~ "REFINE auth-tokens"
+  end
 end

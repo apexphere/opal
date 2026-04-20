@@ -138,6 +138,24 @@ defmodule SymphonyElixir.Wiki.InjectorTest do
     end
   end
 
+  describe "inject/3 — entry file unreadable" do
+    defmodule GhostQuery do
+      def query(_project_key, _ctx, _opts), do: {:ok, ["ghost", "real"]}
+    end
+
+    test "skips slugs whose entry file cannot be read", ctx do
+      # "ghost" is returned by the query but never written to disk — the
+      # injector must skip it and still copy the other slug.
+      seed_entry(ctx.project_key, "real")
+      Application.put_env(:symphony_elixir, :wiki_query_module, GhostQuery)
+
+      assert :ok = Injector.inject(ctx.workspace, ctx.project_key, %{})
+
+      refute File.exists?(Path.join(ctx.workspace, ".claude/wiki/ghost.md"))
+      assert File.exists?(Path.join(ctx.workspace, ".claude/wiki/real.md"))
+    end
+  end
+
   describe "injected_subdir/0" do
     test "is .claude/wiki" do
       assert Injector.injected_subdir() == ".claude/wiki"

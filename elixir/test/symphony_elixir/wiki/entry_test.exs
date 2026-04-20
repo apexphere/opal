@@ -295,4 +295,63 @@ defmodule SymphonyElixir.Wiki.EntryTest do
       assert "foo-4" = Entry.resolve_collision("foo", fn slug -> MapSet.member?(taken, slug) end)
     end
   end
+
+  describe "max_slug_length/0" do
+    test "returns the slug length cap" do
+      assert Entry.max_slug_length() == 60
+    end
+  end
+
+  describe "parse/1 — tolerant normalization" do
+    test "treats a non-list `sources` value as empty" do
+      raw = """
+      ---
+      slug: foo
+      title: t
+      created_at: 2026-04-20T00:00:00Z
+      updated_at: 2026-04-20T00:00:00Z
+      sources: "not a list"
+      ---
+      body
+      """
+
+      assert {:ok, entry} = Entry.parse(raw)
+      assert entry.sources == []
+    end
+
+    test "treats a non-list `related` value as empty" do
+      raw = """
+      ---
+      slug: foo
+      title: t
+      created_at: 2026-04-20T00:00:00Z
+      updated_at: 2026-04-20T00:00:00Z
+      related: "not a list"
+      ---
+      body
+      """
+
+      assert {:ok, entry} = Entry.parse(raw)
+      assert entry.related == []
+    end
+  end
+
+  describe "serialize/1 — escaping" do
+    test "wraps a title containing a newline in quotes" do
+      entry = %Entry{
+        slug: "x",
+        title: ~s(has "quote" and\nnewline),
+        topic: "",
+        revision: 1,
+        created_at: "2026-04-20T00:00:00Z",
+        updated_at: "2026-04-20T00:00:00Z",
+        body: "b"
+      }
+
+      raw = Entry.serialize(entry)
+      # Exercises the newline branch of escape_yaml_string/1: wraps in "…"
+      # and backslash-escapes embedded quotes.
+      assert raw =~ ~s(title: "has \\"quote\\")
+    end
+  end
 end

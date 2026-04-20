@@ -130,5 +130,15 @@ defmodule SymphonyElixir.Wiki.StoreTest do
     test "is idempotent on missing slug", ctx do
       assert :ok = Store.delete(ctx.root, ctx.project_key, "never-existed")
     end
+
+    test "surfaces non-enoent errors from File.rm", ctx do
+      # Create a DIRECTORY at the would-be entry path. File.rm returns
+      # {:error, :eperm} rather than removing it, exercising the non-enoent
+      # branch.
+      entry_dir = Store.entry_path(ctx.root, ctx.project_key, "collision")
+      File.mkdir_p!(entry_dir)
+
+      assert {:error, _reason} = Store.delete(ctx.root, ctx.project_key, "collision")
+    end
   end
 end

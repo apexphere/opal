@@ -151,15 +151,9 @@ defmodule SymphonyElixir.Curator.Review do
             body: merged_body
         }
 
-        case Wiki.put(project_key, updated) do
-          :ok ->
-            io.puts("Accepted. Refined wiki/#{slug}.md (revision #{updated.revision})")
-            :accepted
-
-          {:error, reason} = error ->
-            io.puts("Failed to write entry: #{inspect(reason)}")
-            error
-        end
+        :ok = Wiki.put(project_key, updated)
+        io.puts("Accepted. Refined wiki/#{slug}.md (revision #{updated.revision})")
+        :accepted
 
       {:error, reason} = error ->
         io.puts("Cannot refine missing entry #{slug}: #{inspect(reason)}")

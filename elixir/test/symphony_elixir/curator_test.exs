@@ -148,6 +148,37 @@ defmodule SymphonyElixir.CuratorTest do
       assert {:error, {:article_too_large, _, _}} =
                Curator.learn(ctx.article_path, project_key: ctx.project_key)
     end
+
+    test "learn/1 raises without a project_key", ctx do
+      assert_raise KeyError, fn -> Curator.learn(ctx.article_path) end
+    end
+  end
+
+  describe "learn/2 — summary cap" do
+    test "filters by topic-overlap when there are more than 200 summaries", ctx do
+      # Seed 201 entries so maybe_filter_summaries takes the over-cap branch.
+      # One entry is crafted to overlap the article body (which mentions
+      # "react hooks") so it survives the top-N slice.
+      seed_entry(ctx.project_key, "react-hooks-overlap", title: "React hooks", topic: "react")
+
+      Enum.each(1..200, fn i ->
+        seed_entry(ctx.project_key, "filler-#{i}", title: "Filler #{i}", topic: "other")
+      end)
+
+      Application.put_env(
+        :symphony_elixir,
+        :curator_stub_response,
+        {:fn,
+         fn _input, summaries, _candidates ->
+           send(self(), {:summaries_count, length(summaries)})
+           {:ok, Proposal.reject("test")}
+         end}
+      )
+
+      assert {:ok, _} = Curator.learn(ctx.article_path, project_key: ctx.project_key)
+      assert_received {:summaries_count, count}
+      assert count == 200
+    end
   end
 
   describe "learn/2 — distiller injection point" do

@@ -1,6 +1,8 @@
 defmodule SymphonyElixir.Curator.ReviewTest do
   use SymphonyElixir.TestSupport
 
+  import ExUnit.CaptureIO
+
   alias SymphonyElixir.Curator.{Proposal, Review}
   alias SymphonyElixir.Wiki
   alias SymphonyElixir.Wiki.{Entry, Store}
@@ -89,6 +91,12 @@ defmodule SymphonyElixir.Curator.ReviewTest do
       refute diff =~ "+same"
       refute diff =~ "-same"
     end
+
+    test "uses the default `wiki-entry` label when none is provided" do
+      diff = Review.unified_diff("", "added\n")
+      assert diff =~ "--- a/wiki-entry"
+      assert diff =~ "+++ b/wiki-entry"
+    end
   end
 
   describe "run/3 — :reject" do
@@ -170,6 +178,67 @@ defmodule SymphonyElixir.Curator.ReviewTest do
 
       assert :rejected = Review.run(proposal, ctx.project_key, io: CapturingIO, input_fun: input_fun)
     end
+
+    test ~s(accepts on legacy "y" answer), ctx do
+      proposal = Proposal.create(build_entry("alpha", "body"), "rationale")
+
+      assert :accepted =
+               Review.run(proposal, ctx.project_key,
+                 io: CapturingIO,
+                 input_fun: fn _ -> "y" end
+               )
+
+      assert Wiki.exists?(ctx.project_key, "alpha")
+    end
+
+    test ~s(rejects on legacy "n" answer), ctx do
+      proposal = Proposal.create(build_entry("alpha", "body"), "rationale")
+
+      assert :rejected =
+               Review.run(proposal, ctx.project_key,
+                 io: CapturingIO,
+                 input_fun: fn _ -> "n" end
+               )
+
+      refute Wiki.exists?(ctx.project_key, "alpha")
+    end
+
+    test "surfaces Wiki.put errors (e.g. invalid slug) from apply", ctx do
+      bad_entry = %{build_entry("alpha", "body") | slug: "Invalid Caps"}
+      proposal = Proposal.create(bad_entry, "rationale")
+
+      assert {:error, _reason} =
+               Review.run(proposal, ctx.project_key,
+                 io: CapturingIO,
+                 input_fun: fn _ -> "a" end
+               )
+
+      assert Enum.any?(CapturingIO.lines(), &(&1 =~ "Failed to write entry"))
+    end
+
+    test "falls back to reading from stdin when no input_fun is provided", ctx do
+      proposal = Proposal.create(build_entry("alpha", "body"), "rationale")
+
+      capture_io("r\n", fn ->
+        assert :rejected = Review.run(proposal, ctx.project_key, io: CapturingIO)
+      end)
+
+      refute Wiki.exists?(ctx.project_key, "alpha")
+    end
+
+    test "falls back to an identity editor_fun on edit-then-accept", ctx do
+      proposal = Proposal.create(build_entry("alpha", "# orig\n"), "rationale")
+
+      # No editor_fun — defaults to identity/1, so the body is unchanged.
+      assert :accepted =
+               Review.run(proposal, ctx.project_key,
+                 io: CapturingIO,
+                 input_fun: fn _ -> "e" end
+               )
+
+      assert {:ok, entry} = Wiki.get(ctx.project_key, "alpha")
+      assert entry.body == "# orig\n"
+    end
   end
 
   describe "run/3 — :refine" do
@@ -217,6 +286,20 @@ defmodule SymphonyElixir.Curator.ReviewTest do
                  io: CapturingIO,
                  input_fun: fn _ -> "a" end
                )
+    end
+
+    test "edit-then-accept passes merged body through editor_fun for refine", ctx do
+      proposal = Proposal.refine("auth-tokens", "# v2\n\nnew body\n", "dup")
+
+      assert :accepted =
+               Review.run(proposal, ctx.project_key,
+                 io: CapturingIO,
+                 input_fun: fn _ -> "e" end,
+                 editor_fun: fn body -> body <> "extra line\n" end
+               )
+
+      assert {:ok, refined} = Wiki.get(ctx.project_key, "auth-tokens")
+      assert refined.body =~ "extra line"
     end
   end
 end

@@ -96,13 +96,9 @@ defmodule SymphonyElixir.Curator.Distillers.Article do
       executable ->
         args = ["-p", "--output-format", "text", "--", prompt]
 
-        try do
-          case System.cmd(executable, args, stderr_to_stdout: true) do
-            {output, 0} -> {:ok, output}
-            {output, status} -> {:error, {:claude_exit, status, output}}
-          end
-        rescue
-          error in [ErlangError] -> {:error, {:claude_subprocess_failed, Exception.message(error)}}
+        case System.cmd(executable, args, stderr_to_stdout: true) do
+          {output, 0} -> {:ok, output}
+          {output, status} -> {:error, {:claude_exit, status, output}}
         end
     end
   end

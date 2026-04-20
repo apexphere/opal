@@ -98,4 +98,26 @@ defmodule SymphonyElixir.WikiTest do
       assert Wiki.root!() == ctx.knowledge_root
     end
   end
+
+  describe "list_summaries/1 — corrupt entries" do
+    test "silently drops slugs whose on-disk body fails to parse", ctx do
+      :ok = Wiki.put(ctx.project_key, build_entry("good"))
+
+      # Write a malformed entry file alongside the good one. list_slugs
+      # picks it up, but Entry.parse fails, so summary_for returns nil and
+      # the slug is dropped from summaries.
+      corrupt_path =
+        Path.join([
+          ctx.knowledge_root,
+          ctx.project_key,
+          "wiki",
+          "corrupt.md"
+        ])
+
+      File.write!(corrupt_path, "no frontmatter here\n")
+
+      assert {:ok, summaries} = Wiki.list_summaries(ctx.project_key)
+      assert Enum.map(summaries, & &1.slug) == ["good"]
+    end
+  end
 end

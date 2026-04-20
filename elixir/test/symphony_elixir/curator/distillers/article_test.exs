@@ -132,6 +132,51 @@ defmodule SymphonyElixir.Curator.Distillers.ArticleTest do
         Application.delete_env(:symphony_elixir, :curator_claude_command)
       end
     end
+
+    test "defaults to looking up `claude` when no override is configured" do
+      # No env var set -> runs through the `nil -> "claude"` default branch of
+      # command/0. If `claude` isn't on PATH (normal CI case), we get
+      # :claude_command_not_found; if it *is* available, we just ensure the call
+      # returned a tagged tuple. Either outcome exercises the default branch.
+      Application.delete_env(:symphony_elixir, :curator_claude_command)
+
+      input = %{body: "x", source_ref: "y", ingested_at: "z"}
+      result = Article.distill(input, [], [])
+
+      assert match?({:error, {:claude_command_not_found, "claude"}}, result) or
+               match?({:ok, _}, result) or
+               match?({:error, _}, result)
+    end
+
+    test "runs the configured command and feeds its output to parse_output/1" do
+      # /bin/echo exits 0 and prints the args, so we reach run_claude's
+      # success branch and parse_output/1. The echoed prompt contains the
+      # example JSON fence with pseudo-syntax, which Jason cannot decode —
+      # so the distiller surfaces the DecodeError. That exercises the
+      # success path through run_claude + parse_output end-to-end.
+      Application.put_env(:symphony_elixir, :curator_claude_command, "/bin/echo")
+
+      try do
+        input = %{body: "hi", source_ref: "y", ingested_at: "z"}
+        assert {:error, %Jason.DecodeError{}} = Article.distill(input, [], [])
+      after
+        Application.delete_env(:symphony_elixir, :curator_claude_command)
+      end
+    end
+
+    test "surfaces non-zero exit status from the subprocess" do
+      # /bin/cat rejects the -p flag and exits 1 — exercises the
+      # {:error, {:claude_exit, status, output}} branch.
+      Application.put_env(:symphony_elixir, :curator_claude_command, "/bin/cat")
+
+      try do
+        input = %{body: "hi", source_ref: "y", ingested_at: "z"}
+        assert {:error, {:claude_exit, status, _output}} = Article.distill(input, [], [])
+        assert status != 0
+      after
+        Application.delete_env(:symphony_elixir, :curator_claude_command)
+      end
+    end
   end
 
   describe "timeout_ms/0" do

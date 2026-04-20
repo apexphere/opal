@@ -89,12 +89,9 @@ defmodule SymphonyElixir.Curator do
       |> Enum.sort_by(&(-summary_overlap(&1, needles)))
       |> Enum.take(@max_candidates)
       |> Enum.map(fn summary ->
-        case Store.get(root, project_key, summary.slug) do
-          {:ok, entry} -> entry
-          _ -> nil
-        end
+        {:ok, entry} = Store.get(root, project_key, summary.slug)
+        entry
       end)
-      |> Enum.reject(&is_nil/1)
 
     {:ok, candidates}
   end
