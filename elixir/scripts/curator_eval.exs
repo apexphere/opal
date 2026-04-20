@@ -292,6 +292,24 @@ defmodule CuratorEval do
   defp format_decision(%{decision: :reject, rationale: r}), do: "REJECT: #{r}"
   defp format_decision(%{decision: {:create, slug, _}, rationale: r}), do: "CREATE #{slug}: #{r}"
   defp format_decision(%{decision: {:refine, slug, _}, rationale: r}), do: "REFINE #{slug}: #{r}"
+
+  defp format_decision(%{decision: {:human_review, producer, verdict}}) do
+    producer_str =
+      case producer do
+        :reject -> "reject"
+        {:create, slug, _} -> "create #{slug}"
+        {:refine, slug, _} -> "refine #{slug}"
+      end
+
+    verdict_str =
+      case verdict do
+        :approve -> "approve"
+        {:reject, reason} -> "reject: #{reason}"
+        {:conflict, slug, reason} -> "conflict with #{slug}: #{reason}"
+      end
+
+    "HUMAN_REVIEW: producer=#{producer_str}; critic=#{verdict_str}"
+  end
 end
 
 defmodule FakeRetrievalQuery do

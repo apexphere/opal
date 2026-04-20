@@ -1,0 +1,11 @@
+{
+  "decision": "refine",
+  "target_slug": "http2-multiplexing",
+  "merged_body": "# HTTP/2 multiplexing\n\nHTTP/2 multiplexes many requests over one TCP connection. Some authors still recommend domain sharding for HTTP/2 because it opens more parallel TCP connections.\n",
+  "rationale": "article discusses HTTP/2 domain sharding — same topic as http2-multiplexing",
+  "critic": {
+    "verdict": "conflict",
+    "slug": "http2-multiplexing",
+    "reason": "article argues domain sharding remains best practice; existing entry states sharding is no longer necessary and hurts performance"
+  }
+}
