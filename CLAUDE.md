@@ -25,3 +25,16 @@ alternative instead.
 
 When discussing "testing," default to user-perspective verification (use the thing the way it was
 built to be used), not just unit tests — see VISION.md for the reasoning.
+
+## Prefer agent teams for non-trivial work
+
+Opal's own self-verifying pillar is a bet on agents collaborating to ship real features. Model
+that here: for anything bigger than a small edit, reach for specialized subagents instead of
+doing it all in the lead session. Use Plan to design before implementing, Explore (thorough)
+when the codebase question spans more than a couple of files, and dev+QA teams to build and
+verify end-to-end. Parallelize independent work in a single turn.
+
+The lead session's job is to frame the problem, decide scope, integrate the outputs, and
+keep the vision in view. It is *not* to grind through implementation details that a teammate
+can do faster and in parallel. If a task is sequential and trivial, do it inline; otherwise,
+brief teammates with enough context that they can make judgement calls, and let them run.
