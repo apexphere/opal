@@ -54,13 +54,13 @@ defmodule SymphonyElixir.Wiki.Injector do
 
   defp copy_entries(workspace, project_key, slugs) do
     target_dir = Path.join(workspace, @injected_subdir)
-    File.mkdir_p!(target_dir)
 
     {written, _bytes} =
       slugs
       |> Enum.reduce({[], 0}, fn slug, {acc, bytes} ->
         case load_entry_raw(project_key, slug) do
           {:ok, raw} when bytes + byte_size(raw) <= @max_total_bytes ->
+            File.mkdir_p!(target_dir)
             target = Path.join(target_dir, slug <> ".md")
             File.write!(target, raw)
             {[slug | acc], bytes + byte_size(raw)}
