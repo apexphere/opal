@@ -2,26 +2,23 @@ defmodule SymphonyElixir.Curator do
   @moduledoc """
   Orchestrates one article -> proposal cycle.
 
-  Pipeline (Phase 1):
+  Pipeline:
     1. Read the article (cap to 32 KB pre-LLM, reject hard above that).
     2. Load all entry summaries for the project (cap 200; pre-filter by
        topic substring against article first 200 chars when over).
     3. Pre-rank candidate full bodies (≤5) by topic-substring overlap so
        refinement context fits in one LLM call.
-    4. Invoke the configured `Distiller` once. The distiller returns a
-       structured `Proposal`.
-    5. Sanitize the proposal:
-         - On :reject -> pass through.
-         - On {:create, _} -> sanitize/collision-resolve the slug, build
-           a complete `Entry` with timestamps and source.
-         - On {:refine, _} -> the input slug from the candidate set is
-           authoritative; the distiller's slug is discarded.
+    4. Fire the distiller (producer) and critic in parallel via
+       `Task.async_stream`. Producer proposes; critic flags.
+    5. Sanitize the producer's proposal (slug canonicalization, timestamps).
+    6. Consolidate producer proposal + critic verdict into a final decision
+       (see `SymphonyElixir.Curator.Consolidator`). Contradictions route to
+       `:human_review`.
 
-  Phase 1 stops at the proposal — `put` is the human-review CLI's
-  responsibility (see `Curator.Review`).
+  `put` is the human-review CLI's responsibility (see `Curator.Review`).
   """
 
-  alias SymphonyElixir.Curator.Proposal
+  alias SymphonyElixir.Curator.{Consolidator, Proposal}
   alias SymphonyElixir.Wiki
   alias SymphonyElixir.Wiki.{Entry, Store}
 
@@ -33,16 +30,20 @@ defmodule SymphonyElixir.Curator do
           project_key: String.t(),
           source_ref: String.t() | nil,
           distiller: module() | nil,
+          critic: module() | nil,
           now: (-> String.t())
         ]
 
   @type result :: {:ok, Proposal.t()} | {:error, term()}
+
+  @fanout_timeout_ms 180_000
 
   @spec learn(Path.t(), opts()) :: result()
   def learn(article_path, opts \\ []) when is_binary(article_path) do
     project_key = Keyword.fetch!(opts, :project_key)
     source_ref = Keyword.get(opts, :source_ref, article_path)
     distiller = Keyword.get(opts, :distiller, default_distiller())
+    critic = Keyword.get(opts, :critic, default_critic())
     now_fun = Keyword.get(opts, :now, &iso8601_now/0)
     now = now_fun.()
 
@@ -51,13 +52,31 @@ defmodule SymphonyElixir.Curator do
          {:ok, summaries} <- Wiki.list_summaries(project_key),
          capped_summaries <- maybe_filter_summaries(summaries, raw_body),
          {:ok, candidates} <- load_candidates(project_key, raw_body, capped_summaries),
-         {:ok, proposal} <-
-           distiller.distill(
-             %{body: raw_body, source_ref: source_ref, ingested_at: now},
-             capped_summaries,
-             candidates
-           ) do
-      sanitize_proposal(proposal, project_key, source_ref, now, raw_body)
+         input <- %{body: raw_body, source_ref: source_ref, ingested_at: now},
+         {:ok, proposal, verdict} <-
+           run_fanout(distiller, critic, input, capped_summaries, candidates),
+         {:ok, sanitized} <- sanitize_proposal(proposal, project_key, source_ref, now, raw_body) do
+      {:ok, Consolidator.decide(sanitized, verdict)}
+    end
+  end
+
+  defp run_fanout(distiller, critic, input, summaries, candidates) do
+    jobs = [
+      fn -> {:distill, distiller.distill(input, summaries, candidates)} end,
+      fn -> {:critique, critic.critique(input.body, summaries, candidates)} end
+    ]
+
+    results =
+      jobs
+      |> Task.async_stream(& &1.(), max_concurrency: 2, timeout: @fanout_timeout_ms, ordered: true)
+      |> Enum.map(fn {:ok, value} -> value end)
+
+    proposal_result = Keyword.fetch!(results, :distill)
+    verdict_result = Keyword.fetch!(results, :critique)
+
+    with {:ok, proposal} <- proposal_result,
+         {:ok, verdict} <- verdict_result do
+      {:ok, proposal, verdict}
     end
   end
 
@@ -130,10 +149,14 @@ defmodule SymphonyElixir.Curator do
           status: entry.status || "active"
       }
 
+      final_decision = {:create, final_slug, finalized}
+
       {:ok,
        %Proposal{
          proposal
-         | decision: {:create, final_slug, finalized},
+         | decision: final_decision,
+           producer_decision: final_decision,
+           final_decision: final_decision,
            source_ref: proposal.source_ref || source_ref
        }}
     end
@@ -148,10 +171,14 @@ defmodule SymphonyElixir.Curator do
        ) do
     case Wiki.exists?(project_key, slug) do
       true ->
+        final_decision = {:refine, slug, merged_body}
+
         {:ok,
          %Proposal{
            proposal
-           | decision: {:refine, slug, merged_body},
+           | decision: final_decision,
+             producer_decision: final_decision,
+             final_decision: final_decision,
              source_ref: proposal.source_ref || source_ref
          }}
 
@@ -169,6 +196,14 @@ defmodule SymphonyElixir.Curator do
       :symphony_elixir,
       :curator_distiller_module,
       SymphonyElixir.Curator.Distillers.Article
+    )
+  end
+
+  defp default_critic do
+    Application.get_env(
+      :symphony_elixir,
+      :curator_critic_module,
+      SymphonyElixir.Curator.Critics.Consistency
     )
   end
 

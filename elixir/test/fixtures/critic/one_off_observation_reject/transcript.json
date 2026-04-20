@@ -1,0 +1,12 @@
+{
+  "decision": "create",
+  "slug": "flaky-test-one-off",
+  "title": "Flaky test observation",
+  "topic": "ci/flakes",
+  "body": "# Flaky test observation\n\nOne CI-only failure last Tuesday; no reproduction.\n",
+  "rationale": "distilled observation",
+  "critic": {
+    "verdict": "reject",
+    "reason": "single non-reproducible incident with no pattern — wiki entries should capture durable lessons, not one-off anecdotes"
+  }
+}

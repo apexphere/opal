@@ -312,4 +312,152 @@ defmodule SymphonyElixir.Curator.ReviewTest do
       assert refined.body =~ "extra line"
     end
   end
+
+  describe "run/3 — :human_review (create producer + critic conflict)" do
+    test "renders critic verdict and producer create diff", ctx do
+      proposal =
+        Proposal.with_final(
+          Proposal.create(build_entry("alpha", "# new\n"), "novel"),
+          {:human_review, {:create, "alpha", build_entry("alpha", "# new\n")}, {:conflict, "other", "contradicts other"}},
+          {:conflict, "other", "contradicts other"}
+        )
+
+      assert :quit =
+               Review.run(proposal, ctx.project_key,
+                 io: CapturingIO,
+                 input_fun: fn _ -> "q" end
+               )
+
+      output = Enum.join(CapturingIO.lines(), "\n")
+      assert output =~ "HUMAN REVIEW"
+      assert output =~ "conflict with other"
+      assert output =~ "CREATE slug=alpha"
+    end
+
+    test "accept forces write of producer create", ctx do
+      proposal =
+        Proposal.with_final(
+          Proposal.create(build_entry("alpha", "# body\n"), "novel"),
+          {:human_review, {:create, "alpha", build_entry("alpha", "# body\n")}, {:conflict, "other", "contradicts"}},
+          {:conflict, "other", "contradicts"}
+        )
+
+      assert :accepted =
+               Review.run(proposal, ctx.project_key,
+                 io: CapturingIO,
+                 input_fun: fn _ -> "a" end
+               )
+
+      assert {:ok, _} = Wiki.get(ctx.project_key, "alpha")
+    end
+
+    test "loops on unrecognized input", ctx do
+      proposal =
+        Proposal.with_final(
+          Proposal.create(build_entry("alpha", "b"), "novel"),
+          {:human_review, {:create, "alpha", build_entry("alpha", "b")}, :approve},
+          :approve
+        )
+
+      answers = ["?", "huh", "q"]
+      counter = :counters.new(1, [])
+
+      input_fun = fn _ ->
+        i = :counters.get(counter, 1)
+        :counters.add(counter, 1, 1)
+        Enum.at(answers, i, "q")
+      end
+
+      assert :quit = Review.run(proposal, ctx.project_key, io: CapturingIO, input_fun: input_fun)
+    end
+
+    test "renders reject verdict phrasing", ctx do
+      proposal =
+        Proposal.with_final(
+          Proposal.create(build_entry("alpha", "b"), "novel"),
+          {:human_review, {:create, "alpha", build_entry("alpha", "b")}, {:reject, "one-off"}},
+          {:reject, "one-off"}
+        )
+
+      :quit = Review.run(proposal, ctx.project_key, io: CapturingIO, input_fun: fn _ -> "q" end)
+      assert Enum.any?(CapturingIO.lines(), &(&1 =~ "reject — one-off"))
+    end
+
+    test "renders approve verdict phrasing", ctx do
+      proposal =
+        Proposal.with_final(
+          Proposal.create(build_entry("alpha", "b"), "novel"),
+          {:human_review, {:create, "alpha", build_entry("alpha", "b")}, :approve},
+          :approve
+        )
+
+      :quit = Review.run(proposal, ctx.project_key, io: CapturingIO, input_fun: fn _ -> "q" end)
+      assert Enum.any?(CapturingIO.lines(), &(&1 =~ "Critic verdict: approve"))
+    end
+
+    test "renders nil verdict phrasing", ctx do
+      proposal =
+        Proposal.with_final(
+          Proposal.create(build_entry("alpha", "b"), "novel"),
+          {:human_review, {:create, "alpha", build_entry("alpha", "b")}, nil},
+          nil
+        )
+
+      :quit = Review.run(proposal, ctx.project_key, io: CapturingIO, input_fun: fn _ -> "q" end)
+      assert Enum.any?(CapturingIO.lines(), &(&1 =~ "(none)"))
+    end
+  end
+
+  describe "run/3 — :human_review (refine producer)" do
+    setup ctx do
+      :ok = Wiki.put(ctx.project_key, build_entry("auth-tokens", "# v1\n\nold\n"))
+      :ok
+    end
+
+    test "renders refine diff under human review header", ctx do
+      proposal =
+        Proposal.with_final(
+          Proposal.refine("auth-tokens", "# v2\n\nnew\n", "dup"),
+          {:human_review, {:refine, "auth-tokens", "# v2\n\nnew\n"}, {:conflict, "other", "cross-entry"}},
+          {:conflict, "other", "cross-entry"}
+        )
+
+      :quit = Review.run(proposal, ctx.project_key, io: CapturingIO, input_fun: fn _ -> "q" end)
+      output = Enum.join(CapturingIO.lines(), "\n")
+      assert output =~ "REFINE slug=auth-tokens"
+      assert output =~ "+new"
+    end
+
+    test "accept forces refine write even with critic conflict", ctx do
+      proposal =
+        Proposal.with_final(
+          Proposal.refine("auth-tokens", "# v2\n\nnew\n", "dup"),
+          {:human_review, {:refine, "auth-tokens", "# v2\n\nnew\n"}, {:conflict, "other", "cross-entry"}},
+          {:conflict, "other", "cross-entry"}
+        )
+
+      assert :accepted =
+               Review.run(proposal, ctx.project_key,
+                 io: CapturingIO,
+                 input_fun: fn _ -> "a" end
+               )
+
+      assert {:ok, refined} = Wiki.get(ctx.project_key, "auth-tokens")
+      assert refined.revision == 2
+      assert refined.body =~ "new"
+    end
+
+    test "refine view handles missing entry at render time", ctx do
+      proposal =
+        Proposal.with_final(
+          Proposal.refine("ghost", "# v2\n", "dup"),
+          {:human_review, {:refine, "ghost", "# v2\n"}, {:conflict, "other", "x"}},
+          {:conflict, "other", "x"}
+        )
+
+      :quit = Review.run(proposal, ctx.project_key, io: CapturingIO, input_fun: fn _ -> "q" end)
+      output = Enum.join(CapturingIO.lines(), "\n")
+      assert output =~ "Could not read current entry"
+    end
+  end
 end

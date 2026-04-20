@@ -1,0 +1,12 @@
+{
+  "decision": "create",
+  "slug": "erlang-persistent-term-caveats",
+  "title": "Erlang :persistent_term caveats",
+  "topic": "erlang/runtime",
+  "body": "# :persistent_term\n\nGlobal per-VM cache for read-mostly constants. Every write triggers a full GC pass over all processes holding the old term — seconds-long pauses on large nodes. Reserve for boot-fixed constants.\n",
+  "rationale": "novel topic — no existing entry mentions persistent_term",
+  "critic": {
+    "verdict": "approve",
+    "reason": "does not contradict any existing entry"
+  }
+}

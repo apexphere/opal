@@ -1,0 +1,11 @@
+{
+  "decision": "refine",
+  "target_slug": "jwt-storage",
+  "merged_body": "# JWT storage\n\nCookies remain the default; some practitioners accept localStorage with short token lifetimes and strict CSP.\n",
+  "rationale": "same-topic refinement",
+  "critic": {
+    "verdict": "conflict",
+    "slug": "csrf-defense",
+    "reason": "article's localStorage recommendation undermines the CSRF-defense entry which warns that localStorage tokens enable CSRF forgery"
+  }
+}

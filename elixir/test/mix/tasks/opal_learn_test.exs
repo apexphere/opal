@@ -24,10 +24,14 @@ defmodule Mix.Tasks.Opal.LearnTest do
     )
 
     Application.put_env(:symphony_elixir, :curator_distiller_module, SymphonyElixir.Curator.Distillers.Stub)
+    Application.put_env(:symphony_elixir, :curator_critic_module, SymphonyElixir.Curator.Critics.Stub)
+    Application.put_env(:symphony_elixir, :curator_stub_critic, :approve)
 
     on_exit(fn ->
       Application.delete_env(:symphony_elixir, :curator_distiller_module)
+      Application.delete_env(:symphony_elixir, :curator_critic_module)
       Application.delete_env(:symphony_elixir, :curator_stub_response)
+      Application.delete_env(:symphony_elixir, :curator_stub_critic)
       File.rm_rf(test_root)
     end)
 
@@ -120,6 +124,37 @@ defmodule Mix.Tasks.Opal.LearnTest do
 
     assert output =~ "CREATE interactive-thing"
     refute SymphonyElixir.Wiki.exists?("github_apexphere_opal-learn-task", "interactive-thing")
+  end
+
+  test "formats a HUMAN_REVIEW decision when producer and critic disagree", ctx do
+    Application.put_env(
+      :symphony_elixir,
+      :curator_stub_response,
+      {:create,
+       %{
+         "slug" => "human-review-thing",
+         "title" => "HR",
+         "topic" => "topic",
+         "body" => "b\n"
+       }}
+    )
+
+    # Conflict slug doesn't need to exist — Stub critic bypasses candidate
+    # validation (only the Consistency critic enforces that).
+    Application.put_env(
+      :symphony_elixir,
+      :curator_stub_critic,
+      {:conflict, "other-slug", "contradicts other"}
+    )
+
+    # Feed "q\n" to Review.run so human_review_loop quits without writing.
+    output =
+      capture_io("q\n", fn ->
+        Learn.run([ctx.article_path, "--project", "github_apexphere_opal-learn-task"])
+      end)
+
+    assert output =~ "HUMAN REVIEW"
+    refute SymphonyElixir.Wiki.exists?("github_apexphere_opal-learn-task", "human-review-thing")
   end
 
   test "formats a REFINE decision", ctx do

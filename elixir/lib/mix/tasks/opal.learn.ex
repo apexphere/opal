@@ -68,6 +68,10 @@ defmodule Mix.Tasks.Opal.Learn do
   defp format_decision(%{decision: {:create, slug, _entry}, rationale: r}), do: "CREATE #{slug}: #{r}"
   defp format_decision(%{decision: {:refine, slug, _body}, rationale: r}), do: "REFINE #{slug}: #{r}"
 
+  defp format_decision(%{decision: {:human_review, _producer, _verdict}, rationale: r}) do
+    "HUMAN REVIEW: #{r}"
+  end
+
   defp auto_apply(proposal, project_key) do
     case proposal.decision do
       :reject ->

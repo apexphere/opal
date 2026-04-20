@@ -11,22 +11,31 @@
 #
 # Exits 0 on full pass, 1 on any failure. Prints a per-fixture summary.
 
-fixtures_dir = Path.join([File.cwd!(), "test/fixtures/curator"])
+curator_fixtures = Path.join([File.cwd!(), "test/fixtures/curator"])
+critic_fixtures = Path.join([File.cwd!(), "test/fixtures/critic"])
 
 defmodule CuratorEval do
   alias SymphonyElixir.Curator
-  alias SymphonyElixir.Curator.{Distillers, Review}
+  alias SymphonyElixir.Curator.{Critics, Distillers, Review}
   alias SymphonyElixir.Wiki
   alias SymphonyElixir.Wiki.{Entry, Injector}
 
   @project_key "github_apexphere_curator-eval"
 
-  def run_all(dir) do
+  def run_all(dirs) when is_list(dirs) do
     fixtures =
-      dir
-      |> File.ls!()
-      |> Enum.map(&Path.join(dir, &1))
-      |> Enum.filter(&File.dir?/1)
+      dirs
+      |> Enum.flat_map(fn dir ->
+        case File.ls(dir) do
+          {:ok, entries} ->
+            entries
+            |> Enum.map(&Path.join(dir, &1))
+            |> Enum.filter(&File.dir?/1)
+
+          _ ->
+            []
+        end
+      end)
       |> Enum.sort()
 
     results = Enum.map(fixtures, &run_one/1)
@@ -76,6 +85,8 @@ defmodule CuratorEval do
 
     Application.put_env(:symphony_elixir, :curator_distiller_module, Distillers.Stub)
     Application.put_env(:symphony_elixir, :curator_stub_response, transcript_to_response(transcript))
+    Application.put_env(:symphony_elixir, :curator_critic_module, Critics.Stub)
+    Application.put_env(:symphony_elixir, :curator_stub_critic, transcript_to_critic(transcript))
 
     try do
       seed_wiki!(fixture_dir, project_key)
@@ -92,6 +103,8 @@ defmodule CuratorEval do
       File.rm_rf(root)
       Application.delete_env(:symphony_elixir, :curator_stub_response)
       Application.delete_env(:symphony_elixir, :curator_distiller_module)
+      Application.delete_env(:symphony_elixir, :curator_stub_critic)
+      Application.delete_env(:symphony_elixir, :curator_critic_module)
     end
   end
 
@@ -193,6 +206,11 @@ defmodule CuratorEval do
       {:reject, "refine_or_reject"} ->
         %{name: name, passed: true, reason: nil}
 
+      {{:human_review, _producer, _verdict}, "human_review"} ->
+        # Confirm quit path does not write.
+        :quit = Review.run(proposal, project_key, input_fun: fn _ -> "q" end)
+        %{name: name, passed: true, reason: nil}
+
       {actual, expected_decision} ->
         %{name: name, passed: false, reason: "decision mismatch: #{inspect(actual)} vs #{expected_decision}"}
     end
@@ -222,6 +240,20 @@ defmodule CuratorEval do
   end
 
   defp transcript_to_response(_), do: :reject
+
+  # Existing (Phase 1) fixtures have no critic entry; default to :approve so
+  # their outcomes are unchanged. Phase 2 fixtures add a `"critic"` key.
+  defp transcript_to_critic(%{"critic" => %{"verdict" => "approve"}}), do: :approve
+
+  defp transcript_to_critic(%{"critic" => %{"verdict" => "reject"} = c}) do
+    {:reject, Map.get(c, "reason", "rejected")}
+  end
+
+  defp transcript_to_critic(%{"critic" => %{"verdict" => "conflict"} = c}) do
+    {:conflict, Map.fetch!(c, "slug"), Map.get(c, "reason", "contradicts existing entry")}
+  end
+
+  defp transcript_to_critic(_), do: :approve
 
   defp setup_isolated_root!(fixture_dir) do
     name = Path.basename(fixture_dir)
@@ -260,6 +292,24 @@ defmodule CuratorEval do
   defp format_decision(%{decision: :reject, rationale: r}), do: "REJECT: #{r}"
   defp format_decision(%{decision: {:create, slug, _}, rationale: r}), do: "CREATE #{slug}: #{r}"
   defp format_decision(%{decision: {:refine, slug, _}, rationale: r}), do: "REFINE #{slug}: #{r}"
+
+  defp format_decision(%{decision: {:human_review, producer, verdict}}) do
+    producer_str =
+      case producer do
+        :reject -> "reject"
+        {:create, slug, _} -> "create #{slug}"
+        {:refine, slug, _} -> "refine #{slug}"
+      end
+
+    verdict_str =
+      case verdict do
+        :approve -> "approve"
+        {:reject, reason} -> "reject: #{reason}"
+        {:conflict, slug, reason} -> "conflict with #{slug}: #{reason}"
+      end
+
+    "HUMAN_REVIEW: producer=#{producer_str}; critic=#{verdict_str}"
+  end
 end
 
 defmodule FakeRetrievalQuery do
@@ -304,4 +354,4 @@ if Process.whereis(SymphonyElixir.WorkflowStore) do
   SymphonyElixir.WorkflowStore.force_reload()
 end
 
-CuratorEval.run_all(fixtures_dir)
+CuratorEval.run_all([curator_fixtures, critic_fixtures])
