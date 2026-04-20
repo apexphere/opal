@@ -37,8 +37,28 @@ defmodule SymphonyElixir.PromptBuilder do
   directory. A step passes when its exit code matches `expect_exit` (default 0).
   Steps run sequentially and stop on the first failure. Pick the smallest set
   of steps that prove the user-visible behaviour you delivered actually works —
-  boot the thing, hit it the way a user would, check the response. Unit tests
-  are not enough.
+  boot the thing, hit it the way a user would, check the response.
+
+  ### Recipe steps MUST exercise the delivered interface, not run unit tests
+
+  A step whose `shell` invokes a language test runner (for example `mix test`,
+  `pytest`, `go test`, `npm test`, `cargo test`, `rspec`) is NOT a valid recipe
+  step. Unit tests against code you just wrote prove only internal consistency;
+  the recipe must prove the change works from the outside. If you delivered an
+  HTTP endpoint, the step is a `curl` or equivalent against a running server;
+  if you delivered a CLI flag, the step invokes the CLI with that flag; if you
+  delivered a module function with no user-facing surface, the step is a short
+  `elixir`/`python`/`node` one-liner that calls it and prints an assertion. You
+  may still run unit tests separately as a sanity check — just not as the
+  recipe.
+
+  ### `.opal/` is workspace-only — never commit it
+
+  Write `.opal/verify.json` (and any other files under `.opal/`) to the
+  workspace, but do NOT `git add` them, do NOT stage them, and do NOT let them
+  reach the target repository. They are Opal scratch, not project code. If you
+  use `git add -A` or `git commit -a`, check the staged list and unstage
+  anything under `.opal/` before committing.
   """
 
   @spec build_prompt(SymphonyElixir.Linear.Issue.t(), keyword()) :: String.t()
