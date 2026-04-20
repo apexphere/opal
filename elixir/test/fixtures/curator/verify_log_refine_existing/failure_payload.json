@@ -1,0 +1,10 @@
+{
+  "recipe_description": "Run full mix suite",
+  "failed_step": {
+    "name": "mix credo --strict",
+    "shell": "mix credo --strict",
+    "output": "1 issue found:\n\n  [C] Refactor violation: Function too deep (nesting level 5).\n    lib/symphony_elixir/orchestrator.ex:842\n"
+  },
+  "issue_ref": "OPAL-1235",
+  "started_at": "2026-04-20T12:05:00Z"
+}

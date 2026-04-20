@@ -1,0 +1,7 @@
+{
+  "decision": "reject",
+  "rationale": "this is a known timing-sensitive flake in CoreTest (a few ms off the wall-clock assertion); the code under test is correct and no generalizable lesson exists. Re-running usually passes.",
+  "critic": {
+    "verdict": "approve"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "recipe_description": "Run full mix suite",
+  "failed_step": {
+    "name": "mix test",
+    "shell": "mix test test/symphony_elixir/core_test.exs",
+    "output": "  1) test abnormal worker exit increments retry attempt progressively (SymphonyElixir.CoreTest)\n     Assertion with >= failed\n     code:  assert remaining_ms >= min_remaining_ms\n     left:  39369\n     right: 39500\n     stacktrace:\n       test/symphony_elixir/core_test.exs:783: SymphonyElixir.CoreTest.assert_due_in_range/3\n"
+  },
+  "issue_ref": "OPAL-1236",
+  "started_at": "2026-04-20T12:10:00Z"
+}
