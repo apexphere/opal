@@ -72,7 +72,7 @@ defmodule SymphonyElixir.Curator do
   `:distiller` to override (used by tests and the fixture harness).
   """
   @spec learn_from_failure(failure_payload(), opts()) :: result()
-  def learn_from_failure(payload, opts \\ []) when is_map(payload) do
+  def learn_from_failure(payload, opts) when is_map(payload) do
     recipe = Map.fetch!(payload, :recipe)
     failed_step = Map.fetch!(payload, :failed_step)
     output = Map.fetch!(payload, :output)
