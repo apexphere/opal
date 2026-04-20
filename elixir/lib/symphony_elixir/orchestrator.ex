@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Verification, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -34,6 +34,7 @@ defmodule SymphonyElixir.Orchestrator do
       :tick_timer_ref,
       :tick_token,
       running: %{},
+      verifying: %{},
       completed: MapSet.new(),
       claimed: MapSet.new(),
       retry_attempts: %{},
@@ -116,47 +117,31 @@ defmodule SymphonyElixir.Orchestrator do
     {:noreply, state}
   end
 
-  def handle_info(
-        {:DOWN, ref, :process, _pid, reason},
-        %{running: running} = state
-      ) do
-    case find_issue_id_for_ref(running, ref) do
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    case find_verifying_id_for_ref(state.verifying, ref) do
       nil ->
-        {:noreply, state}
+        handle_running_task_down(ref, reason, state)
 
       issue_id ->
-        {running_entry, state} = pop_running_entry(state, issue_id)
-        state = record_session_completion_totals(state, running_entry)
-        session_id = running_entry_session_id(running_entry)
+        handle_verifying_task_down(issue_id, reason, state)
+    end
+  end
 
-        state =
-          case reason do
-            :normal ->
-              Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check")
+  def handle_info({:verification_done, issue_id, outcome}, state) do
+    case Map.pop(state.verifying, issue_id) do
+      {nil, _} ->
+        Logger.warning("Verification result for unknown issue_id=#{issue_id}; ignoring")
+        {:noreply, state}
 
-              state
-              |> complete_issue(issue_id)
-              |> schedule_issue_retry(issue_id, 1, %{
-                identifier: running_entry.identifier,
-                delay_type: :continuation,
-                worker_host: Map.get(running_entry, :worker_host),
-                workspace_path: Map.get(running_entry, :workspace_path)
-              })
+      {entry, new_verifying} ->
+        if is_reference(Map.get(entry, :ref)), do: Process.demonitor(entry.ref, [:flush])
 
-            _ ->
-              Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
+        steps = Map.get(outcome, :steps, [])
 
-              next_attempt = next_retry_attempt_from_running(running_entry)
+        Logger.info("Verification #{outcome.status} for issue_id=#{issue_id} issue_identifier=#{Map.get(entry, :identifier)} steps=#{length(steps)}")
 
-              schedule_issue_retry(state, issue_id, next_attempt, %{
-                identifier: running_entry.identifier,
-                error: "agent exited: #{inspect(reason)}",
-                worker_host: Map.get(running_entry, :worker_host),
-                workspace_path: Map.get(running_entry, :workspace_path)
-              })
-          end
-
-        Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
+        state = %{state | verifying: new_verifying}
+        state = apply_verification_outcome(state, issue_id, entry, outcome.status)
 
         notify_dashboard()
         {:noreply, state}
@@ -218,6 +203,62 @@ defmodule SymphonyElixir.Orchestrator do
 
   def handle_info(msg, state) do
     Logger.debug("Orchestrator ignored message: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
+  defp handle_running_task_down(ref, reason, %{running: running} = state) do
+    case find_issue_id_for_ref(running, ref) do
+      nil ->
+        {:noreply, state}
+
+      issue_id ->
+        {running_entry, state} = pop_running_entry(state, issue_id)
+        state = record_session_completion_totals(state, running_entry)
+        session_id = running_entry_session_id(running_entry)
+
+        state =
+          case reason do
+            :normal ->
+              Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling continuation check")
+
+              state
+              |> complete_issue(issue_id)
+              |> schedule_issue_retry(issue_id, 1, %{
+                identifier: running_entry.identifier,
+                delay_type: :continuation,
+                worker_host: Map.get(running_entry, :worker_host),
+                workspace_path: Map.get(running_entry, :workspace_path)
+              })
+
+            _ ->
+              Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
+
+              next_attempt = next_retry_attempt_from_running(running_entry)
+
+              schedule_issue_retry(state, issue_id, next_attempt, %{
+                identifier: running_entry.identifier,
+                error: "agent exited: #{inspect(reason)}",
+                worker_host: Map.get(running_entry, :worker_host),
+                workspace_path: Map.get(running_entry, :workspace_path)
+              })
+          end
+
+        Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
+
+        notify_dashboard()
+        {:noreply, state}
+    end
+  end
+
+  defp handle_verifying_task_down(issue_id, reason, state) do
+    {entry, new_verifying} = Map.pop(state.verifying, issue_id)
+
+    Logger.warning("Verification task exited without result for issue_id=#{issue_id} reason=#{inspect(reason)}; treating as skipped")
+
+    state = %{state | verifying: new_verifying}
+    state = apply_verification_outcome(state, issue_id, entry, :skipped)
+
+    notify_dashboard()
     {:noreply, state}
   end
 
@@ -355,9 +396,9 @@ defmodule SymphonyElixir.Orchestrator do
   defp reconcile_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
-        Logger.info("Issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
+        Logger.info("Issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; gating on verification before cleanup")
 
-        terminate_running_issue(state, issue.id, true)
+        route_running_to_verification(state, issue.id)
 
       !issue_routable_to_worker?(issue) ->
         Logger.info("Issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
@@ -859,10 +900,15 @@ defmodule SymphonyElixir.Orchestrator do
 
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
-        Logger.info("Issue state is terminal: issue_id=#{issue_id} issue_identifier=#{issue.identifier} state=#{issue.state}; removing associated workspace")
+        Logger.info("Issue state is terminal on continuation check: issue_id=#{issue_id} issue_identifier=#{issue.identifier} state=#{issue.state}; gating on verification before cleanup")
 
-        cleanup_issue_workspace(issue.identifier, metadata[:worker_host])
-        {:noreply, release_issue_claim(state, issue_id)}
+        verify_metadata = %{
+          identifier: issue.identifier || Map.get(metadata, :identifier),
+          worker_host: Map.get(metadata, :worker_host),
+          workspace_path: Map.get(metadata, :workspace_path)
+        }
+
+        {:noreply, start_verification(state, issue_id, verify_metadata)}
 
       retry_candidate_issue?(issue, terminal_states) ->
         handle_active_retry(state, issue, attempt, metadata)
@@ -931,6 +977,124 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp release_issue_claim(%State{} = state, issue_id) do
     %{state | claimed: MapSet.delete(state.claimed, issue_id)}
+  end
+
+  defp start_verification(%State{} = state, issue_id, metadata) when is_binary(issue_id) and is_map(metadata) do
+    settings = Config.settings!().verification
+    workspace_path = Map.get(metadata, :workspace_path)
+
+    cond do
+      not settings.enabled ->
+        apply_verification_outcome(state, issue_id, metadata, :skipped)
+
+      not is_binary(workspace_path) ->
+        Logger.info("Cannot verify issue_id=#{issue_id} issue_identifier=#{Map.get(metadata, :identifier)}: workspace_path unavailable; treating as skipped")
+
+        apply_verification_outcome(state, issue_id, metadata, :skipped)
+
+      true ->
+        spawn_verification_task(state, issue_id, metadata, workspace_path, settings)
+    end
+  end
+
+  defp spawn_verification_task(%State{} = state, issue_id, metadata, workspace_path, settings) do
+    parent = self()
+
+    task_fun = fn ->
+      outcome = Verification.verify(workspace_path, settings)
+      send(parent, {:verification_done, issue_id, outcome})
+    end
+
+    case Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, task_fun) do
+      {:ok, pid} ->
+        ref = Process.monitor(pid)
+
+        Logger.info("Verification started for issue_id=#{issue_id} issue_identifier=#{Map.get(metadata, :identifier)} workspace=#{workspace_path}")
+
+        verifying_entry = Map.merge(metadata, %{pid: pid, ref: ref})
+        %{state | verifying: Map.put(state.verifying, issue_id, verifying_entry)}
+
+      {:error, reason} ->
+        Logger.warning("Verification task spawn failed for issue_id=#{issue_id} reason=#{inspect(reason)}; treating as skipped")
+
+        apply_verification_outcome(state, issue_id, metadata, :skipped)
+    end
+  end
+
+  defp apply_verification_outcome(%State{} = state, issue_id, entry, :fail) do
+    revert_issue_state(issue_id)
+
+    state
+    |> complete_issue(issue_id)
+    |> schedule_issue_retry(issue_id, 1, %{
+      identifier: Map.get(entry, :identifier),
+      delay_type: :continuation,
+      worker_host: Map.get(entry, :worker_host),
+      workspace_path: Map.get(entry, :workspace_path)
+    })
+  end
+
+  defp apply_verification_outcome(%State{} = state, issue_id, entry, _status) do
+    identifier = Map.get(entry, :identifier)
+    worker_host = Map.get(entry, :worker_host)
+
+    cleanup_issue_workspace(identifier, worker_host)
+
+    %{
+      state
+      | claimed: MapSet.delete(state.claimed, issue_id),
+        retry_attempts: Map.delete(state.retry_attempts, issue_id),
+        completed: MapSet.put(state.completed, issue_id)
+    }
+  end
+
+  defp revert_issue_state(issue_id) when is_binary(issue_id) do
+    active_states = Config.settings!().tracker.active_states
+
+    case List.last(active_states) do
+      nil ->
+        Logger.warning("Verification failed for issue_id=#{issue_id} but no active_states configured; cannot revert")
+
+      target_state ->
+        case Tracker.update_issue_state(issue_id, target_state) do
+          :ok ->
+            Logger.info("Verification reverted issue_id=#{issue_id} to state=#{target_state}")
+
+          {:error, reason} ->
+            Logger.warning("Verification revert failed issue_id=#{issue_id} target_state=#{target_state} reason=#{inspect(reason)}")
+        end
+    end
+  end
+
+  defp find_verifying_id_for_ref(verifying, ref) when is_map(verifying) and is_reference(ref) do
+    Enum.find_value(verifying, fn {issue_id, entry} ->
+      if Map.get(entry, :ref) == ref, do: issue_id
+    end)
+  end
+
+  defp find_verifying_id_for_ref(_verifying, _ref), do: nil
+
+  defp route_running_to_verification(%State{} = state, issue_id) when is_binary(issue_id) do
+    case Map.get(state.running, issue_id) do
+      nil ->
+        release_issue_claim(state, issue_id)
+
+      %{} = running_entry ->
+        pid = Map.get(running_entry, :pid)
+        ref = Map.get(running_entry, :ref)
+
+        if is_reference(ref), do: Process.demonitor(ref, [:flush])
+        if is_pid(pid), do: terminate_task(pid)
+
+        {_, state} = pop_running_entry(state, issue_id)
+        state = record_session_completion_totals(state, running_entry)
+
+        start_verification(state, issue_id, %{
+          identifier: running_entry.identifier,
+          worker_host: Map.get(running_entry, :worker_host),
+          workspace_path: Map.get(running_entry, :workspace_path)
+        })
+    end
   end
 
   defp retry_delay(attempt, metadata) when is_integer(attempt) and attempt > 0 and is_map(metadata) do
