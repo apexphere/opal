@@ -1,0 +1,6 @@
+{
+  "decision": "refine",
+  "target_slug": "react-hooks-cleanup",
+  "merged_body": "# useEffect cleanup\n\nCleanup runs before the next effect, not just on unmount. This means it fires between re-renders when dependencies change — far more often than developers expect. Any expensive teardown logic should account for the multiple invocations.\n",
+  "rationale": "duplicate of react-hooks-cleanup with additional detail about re-render frequency"
+}

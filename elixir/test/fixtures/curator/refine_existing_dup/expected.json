@@ -1,0 +1,7 @@
+{
+  "decision": "refine",
+  "slug": "react-hooks-cleanup",
+  "revision_after": 2,
+  "sources_min": 1,
+  "writes_file": true
+}

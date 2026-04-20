@@ -1,0 +1,3 @@
+{
+  "query_response_slugs": ["elixir-genserver-pitfalls", "postgres-hot-updates", "kafka-rebalances"]
+}
