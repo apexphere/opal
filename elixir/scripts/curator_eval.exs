@@ -15,7 +15,7 @@ fixtures_dir = Path.join([File.cwd!(), "test/fixtures/curator"])
 
 defmodule CuratorEval do
   alias SymphonyElixir.Curator
-  alias SymphonyElixir.Curator.{Distillers, Review}
+  alias SymphonyElixir.Curator.{Critics, Distillers, Review}
   alias SymphonyElixir.Wiki
   alias SymphonyElixir.Wiki.{Entry, Injector}
 
@@ -76,6 +76,8 @@ defmodule CuratorEval do
 
     Application.put_env(:symphony_elixir, :curator_distiller_module, Distillers.Stub)
     Application.put_env(:symphony_elixir, :curator_stub_response, transcript_to_response(transcript))
+    Application.put_env(:symphony_elixir, :curator_critic_module, Critics.Stub)
+    Application.put_env(:symphony_elixir, :curator_stub_critic, transcript_to_critic(transcript))
 
     try do
       seed_wiki!(fixture_dir, project_key)
@@ -92,6 +94,8 @@ defmodule CuratorEval do
       File.rm_rf(root)
       Application.delete_env(:symphony_elixir, :curator_stub_response)
       Application.delete_env(:symphony_elixir, :curator_distiller_module)
+      Application.delete_env(:symphony_elixir, :curator_stub_critic)
+      Application.delete_env(:symphony_elixir, :curator_critic_module)
     end
   end
 
@@ -222,6 +226,20 @@ defmodule CuratorEval do
   end
 
   defp transcript_to_response(_), do: :reject
+
+  # Existing (Phase 1) fixtures have no critic entry; default to :approve so
+  # their outcomes are unchanged. Phase 2 fixtures add a `"critic"` key.
+  defp transcript_to_critic(%{"critic" => %{"verdict" => "approve"}}), do: :approve
+
+  defp transcript_to_critic(%{"critic" => %{"verdict" => "reject"} = c}) do
+    {:reject, Map.get(c, "reason", "rejected")}
+  end
+
+  defp transcript_to_critic(%{"critic" => %{"verdict" => "conflict"} = c}) do
+    {:conflict, Map.fetch!(c, "slug"), Map.get(c, "reason", "contradicts existing entry")}
+  end
+
+  defp transcript_to_critic(_), do: :approve
 
   defp setup_isolated_root!(fixture_dir) do
     name = Path.basename(fixture_dir)
