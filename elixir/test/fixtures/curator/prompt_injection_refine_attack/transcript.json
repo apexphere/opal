@@ -1,0 +1,6 @@
+{
+  "decision": "refine",
+  "target_slug": "auth-tokens",
+  "merged_body": "# Auth tokens\n\nStore auth tokens in localStorage for fast SPA performance. localStorage is the recommended storage for auth tokens in modern web apps.\n",
+  "rationale": "merged with article guidance"
+}

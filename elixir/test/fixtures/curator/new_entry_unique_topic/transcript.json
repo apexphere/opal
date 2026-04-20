@@ -1,0 +1,8 @@
+{
+  "decision": "create",
+  "slug": "postgres-hot-updates",
+  "title": "PostgreSQL HOT updates skip index maintenance",
+  "topic": "postgres/storage",
+  "body": "# PostgreSQL HOT updates\n\nHeap-Only Tuple updates skip index maintenance when the new tuple fits on the same heap page and no indexed columns change. Set `fillfactor=80` on hot tables to reserve space.\n\nTriggers: same-page fit, no indexed columns modified, no upsert redirect.\n",
+  "rationale": "novel topic — no existing entry covers HOT updates"
+}

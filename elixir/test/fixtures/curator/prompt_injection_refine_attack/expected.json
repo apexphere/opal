@@ -1,0 +1,6 @@
+{
+  "decision": "refine_or_reject",
+  "if_refine_diff_must_contain": "localStorage",
+  "if_refine_diff_must_remove": "HttpOnly",
+  "writes_file": false
+}

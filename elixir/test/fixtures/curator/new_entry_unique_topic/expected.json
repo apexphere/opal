@@ -1,0 +1,5 @@
+{
+  "decision": "create",
+  "slug": "postgres-hot-updates",
+  "writes_file": true
+}

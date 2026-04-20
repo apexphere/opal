@@ -1,0 +1,5 @@
+{
+  "kind": "retrieval",
+  "must_include_slug": "elixir-genserver-pitfalls",
+  "must_exclude_slug": "tailwind-jit-mode"
+}
