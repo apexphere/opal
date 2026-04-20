@@ -31,8 +31,17 @@ defmodule SymphonyElixir.Curator do
           source_ref: String.t() | nil,
           distiller: module() | nil,
           critic: module() | nil,
+          source_kind: String.t() | nil,
           now: (-> String.t())
         ]
+
+  @type failure_payload :: %{
+          required(:recipe) => SymphonyElixir.Verification.Recipe.t(),
+          required(:failed_step) => map(),
+          required(:output) => String.t(),
+          required(:issue_ref) => String.t(),
+          optional(:started_at) => String.t()
+        }
 
   @type result :: {:ok, Proposal.t()} | {:error, term()}
 
@@ -40,23 +49,95 @@ defmodule SymphonyElixir.Curator do
 
   @spec learn(Path.t(), opts()) :: result()
   def learn(article_path, opts \\ []) when is_binary(article_path) do
+    with {:ok, raw_body} <- File.read(article_path),
+         :ok <- check_size(raw_body) do
+      source_ref = Keyword.get(opts, :source_ref, article_path)
+
+      do_learn(
+        raw_body,
+        opts
+        |> Keyword.put(:source_ref, source_ref)
+        |> Keyword.put_new(:source_kind, "article")
+        |> Keyword.put_new(:distiller, default_distiller())
+      )
+    end
+  end
+
+  @doc """
+  Curator entry point for a failed verification step. The payload is turned
+  into an in-memory "article" (recipe + captured output) and funneled
+  through the same distiller/critic/consolidator pipeline as `learn/2`.
+
+  The failure distiller (`Distillers.VerifyLog`) is the default; supply
+  `:distiller` to override (used by tests and the fixture harness).
+  """
+  @spec learn_from_failure(failure_payload(), opts()) :: result()
+  def learn_from_failure(payload, opts) when is_map(payload) do
+    recipe = Map.fetch!(payload, :recipe)
+    failed_step = Map.fetch!(payload, :failed_step)
+    output = Map.fetch!(payload, :output)
+    issue_ref = Map.fetch!(payload, :issue_ref)
+    started_at = Map.get(payload, :started_at, iso8601_now())
+
+    source_ref = build_failure_source_ref(issue_ref, recipe, failed_step, started_at)
+    raw_body = build_failure_body(failed_step, output)
+
+    with :ok <- check_size(raw_body) do
+      do_learn(
+        raw_body,
+        opts
+        |> Keyword.put(:source_ref, source_ref)
+        |> Keyword.put_new(:source_kind, "verify_log")
+        |> Keyword.put_new(:distiller, default_failure_distiller())
+      )
+    end
+  end
+
+  defp do_learn(raw_body, opts) when is_binary(raw_body) do
     project_key = Keyword.fetch!(opts, :project_key)
-    source_ref = Keyword.get(opts, :source_ref, article_path)
-    distiller = Keyword.get(opts, :distiller, default_distiller())
+    source_ref = Keyword.fetch!(opts, :source_ref)
+    source_kind = Keyword.fetch!(opts, :source_kind)
+    distiller = Keyword.fetch!(opts, :distiller)
     critic = Keyword.get(opts, :critic, default_critic())
     now_fun = Keyword.get(opts, :now, &iso8601_now/0)
     now = now_fun.()
 
-    with {:ok, raw_body} <- File.read(article_path),
-         :ok <- check_size(raw_body),
-         {:ok, summaries} <- Wiki.list_summaries(project_key),
+    with {:ok, summaries} <- Wiki.list_summaries(project_key),
          capped_summaries <- maybe_filter_summaries(summaries, raw_body),
          {:ok, candidates} <- load_candidates(project_key, raw_body, capped_summaries),
          input <- %{body: raw_body, source_ref: source_ref, ingested_at: now},
          {:ok, proposal, verdict} <-
            run_fanout(distiller, critic, input, capped_summaries, candidates),
-         {:ok, sanitized} <- sanitize_proposal(proposal, project_key, source_ref, now, raw_body) do
+         {:ok, sanitized} <-
+           sanitize_proposal(proposal, project_key, source_ref, source_kind, now) do
       {:ok, Consolidator.decide(sanitized, verdict)}
+    end
+  end
+
+  defp build_failure_source_ref(issue_ref, recipe, failed_step, started_at) do
+    description = recipe_description(recipe)
+    step_name = Map.get(failed_step, :name) || Map.get(failed_step, "name") || "step"
+    "#{issue_ref}@#{description}#step:#{step_name}@#{started_at}"
+  end
+
+  defp recipe_description(%{description: description}) when is_binary(description), do: description
+  defp recipe_description(_), do: ""
+
+  defp build_failure_body(failed_step, output) do
+    shell = Map.get(failed_step, :shell) || Map.get(failed_step, "shell") || ""
+    truncated = truncate_head_tail(output, div(@max_article_bytes, 8))
+    shell <> "\n---OUTPUT---\n" <> truncated
+  end
+
+  @doc false
+  @spec truncate_head_tail(String.t(), pos_integer()) :: String.t()
+  def truncate_head_tail(text, half_bytes) when is_binary(text) and is_integer(half_bytes) do
+    if byte_size(text) <= 2 * half_bytes do
+      text
+    else
+      head = binary_part(text, 0, half_bytes)
+      tail = binary_part(text, byte_size(text) - half_bytes, half_bytes)
+      head <> "\n...[truncated]...\n" <> tail
     end
   end
 
@@ -128,11 +209,11 @@ defmodule SymphonyElixir.Curator do
     Enum.count(needles, &String.contains?(haystack, &1))
   end
 
-  defp sanitize_proposal(%Proposal{decision: :reject} = proposal, _project_key, source_ref, _now, _body) do
+  defp sanitize_proposal(%Proposal{decision: :reject} = proposal, _project_key, source_ref, _source_kind, _now) do
     {:ok, %Proposal{proposal | source_ref: proposal.source_ref || source_ref}}
   end
 
-  defp sanitize_proposal(%Proposal{decision: {:create, _slug, %Entry{} = entry}} = proposal, project_key, source_ref, now, _body) do
+  defp sanitize_proposal(%Proposal{decision: {:create, _slug, %Entry{} = entry}} = proposal, project_key, source_ref, source_kind, now) do
     with {:ok, base_slug} <- Entry.sanitize_slug(entry.slug),
          final_slug <-
            Entry.resolve_collision(base_slug, fn slug ->
@@ -144,7 +225,7 @@ defmodule SymphonyElixir.Curator do
           revision: 1,
           created_at: now,
           updated_at: now,
-          sources: ensure_source(entry.sources, source_ref, now),
+          sources: ensure_source(entry.sources, source_kind, source_ref, now),
           confidence: entry.confidence || "medium",
           status: entry.status || "active"
       }
@@ -166,8 +247,8 @@ defmodule SymphonyElixir.Curator do
          %Proposal{decision: {:refine, slug, merged_body}} = proposal,
          project_key,
          source_ref,
-         _now,
-         _body
+         _source_kind,
+         _now
        ) do
     case Wiki.exists?(project_key, slug) do
       true ->
@@ -187,8 +268,8 @@ defmodule SymphonyElixir.Curator do
     end
   end
 
-  defp ensure_source(sources, source_ref, now) when is_list(sources) do
-    sources ++ [%{kind: "article", ref: source_ref, ingested_at: now}]
+  defp ensure_source(sources, source_kind, source_ref, now) when is_list(sources) do
+    sources ++ [%{kind: source_kind, ref: source_ref, ingested_at: now}]
   end
 
   defp default_distiller do
@@ -196,6 +277,14 @@ defmodule SymphonyElixir.Curator do
       :symphony_elixir,
       :curator_distiller_module,
       SymphonyElixir.Curator.Distillers.Article
+    )
+  end
+
+  defp default_failure_distiller do
+    Application.get_env(
+      :symphony_elixir,
+      :curator_failure_distiller_module,
+      SymphonyElixir.Curator.Distillers.VerifyLog
     )
   end
 

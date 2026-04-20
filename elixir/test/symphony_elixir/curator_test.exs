@@ -210,6 +210,158 @@ defmodule SymphonyElixir.CuratorTest do
     end
   end
 
+  defp failure_payload(overrides \\ %{}) do
+    Map.merge(
+      %{
+        recipe: %SymphonyElixir.Verification.Recipe{
+          description: "run the suite",
+          steps: []
+        },
+        failed_step: %{name: "ping", shell: "curl -fsS http://localhost:4000"},
+        output: "connection refused\nsocket error",
+        issue_ref: "issue-123",
+        started_at: "2026-04-20T12:00:00Z"
+      },
+      overrides
+    )
+  end
+
+  describe "learn_from_failure/2 — distills a failed verify step" do
+    setup do
+      Application.put_env(
+        :symphony_elixir,
+        :curator_failure_distiller_module,
+        Distillers.Stub
+      )
+
+      on_exit(fn ->
+        Application.delete_env(:symphony_elixir, :curator_failure_distiller_module)
+      end)
+
+      :ok
+    end
+
+    test "creates a lesson entry with kind=verify_log", ctx do
+      Application.put_env(
+        :symphony_elixir,
+        :curator_stub_response,
+        {:create,
+         %{
+           "slug" => "curl-failure-lesson",
+           "title" => "Curl failure lesson",
+           "topic" => "infra",
+           "body" => "# lesson\n\ncheck the server is running\n"
+         }}
+      )
+
+      now_fixed = "2026-04-20T12:00:00Z"
+
+      assert {:ok, proposal} =
+               Curator.learn_from_failure(failure_payload(),
+                 project_key: ctx.project_key,
+                 now: fn -> now_fixed end
+               )
+
+      assert {:create, "curl-failure-lesson", entry} = proposal.decision
+
+      assert [%{kind: "verify_log", ref: source_ref, ingested_at: ^now_fixed}] = entry.sources
+      assert source_ref =~ "issue-123"
+      assert source_ref =~ "#step:ping"
+      assert source_ref =~ "@run the suite"
+    end
+
+    test "truncates very large outputs head+tail", ctx do
+      huge = String.duplicate("x", Curator.max_article_bytes())
+      test_pid = self()
+
+      Application.put_env(
+        :symphony_elixir,
+        :curator_stub_response,
+        {:fn,
+         fn input, _summaries, _candidates ->
+           send(test_pid, {:body_size, byte_size(input.body)})
+           {:ok, Proposal.reject("test")}
+         end}
+      )
+
+      assert {:ok, _} =
+               Curator.learn_from_failure(
+                 failure_payload(%{output: huge}),
+                 project_key: ctx.project_key
+               )
+
+      assert_received {:body_size, size}
+      assert size < Curator.max_article_bytes()
+    end
+
+    test "surfaces a distiller error", ctx do
+      Application.delete_env(:symphony_elixir, :curator_stub_response)
+
+      assert {:error, :stub_response_not_configured} =
+               Curator.learn_from_failure(failure_payload(), project_key: ctx.project_key)
+    end
+
+    test "passes refine proposals through when target exists", ctx do
+      seed_entry(ctx.project_key, "flaky-endpoints", title: "Flaky endpoints")
+
+      Application.put_env(
+        :symphony_elixir,
+        :curator_stub_response,
+        {:refine, "flaky-endpoints", "merged lesson body\n"}
+      )
+
+      assert {:ok, proposal} =
+               Curator.learn_from_failure(failure_payload(), project_key: ctx.project_key)
+
+      assert {:refine, "flaky-endpoints", _} = proposal.decision
+    end
+
+    test "tolerates step maps with string keys", ctx do
+      Application.put_env(:symphony_elixir, :curator_stub_response, {:reject, "noop"})
+
+      payload =
+        failure_payload(%{failed_step: %{"name" => "ping", "shell" => "curl -fsS ..."}})
+
+      assert {:ok, %Proposal{decision: :reject}} =
+               Curator.learn_from_failure(payload, project_key: ctx.project_key)
+    end
+
+    test "tolerates recipes without a description", ctx do
+      Application.put_env(:symphony_elixir, :curator_stub_response, {:reject, "noop"})
+
+      payload =
+        failure_payload(%{
+          recipe: %SymphonyElixir.Verification.Recipe{description: nil, steps: []}
+        })
+
+      assert {:ok, _} = Curator.learn_from_failure(payload, project_key: ctx.project_key)
+    end
+
+    test "stamps started_at with a default when caller omits it", ctx do
+      Application.put_env(:symphony_elixir, :curator_stub_response, {:reject, "noop"})
+
+      payload =
+        failure_payload()
+        |> Map.delete(:started_at)
+
+      assert {:ok, _} = Curator.learn_from_failure(payload, project_key: ctx.project_key)
+    end
+  end
+
+  describe "truncate_head_tail/2" do
+    test "leaves short strings intact" do
+      assert SymphonyElixir.Curator.truncate_head_tail("hello", 10) == "hello"
+    end
+
+    test "head+tail truncates strings over 2*half_bytes" do
+      text = String.duplicate("a", 100) <> String.duplicate("b", 100)
+      result = SymphonyElixir.Curator.truncate_head_tail(text, 10)
+      assert result =~ "[truncated]"
+      assert String.starts_with?(result, "aaaa")
+      assert String.ends_with?(result, "bbbb")
+    end
+  end
+
   describe "learn/2 — critic fan-out" do
     test "critic :approve passes producer create through", ctx do
       Application.put_env(

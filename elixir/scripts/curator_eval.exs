@@ -70,10 +70,17 @@ defmodule CuratorEval do
       |> Jason.decode!()
 
     article_path = Path.join(fixture_dir, "input_article.md")
+    failure_payload_path = Path.join(fixture_dir, "failure_payload.json")
 
-    case Map.get(expected, "kind") do
-      "retrieval" -> evaluate_retrieval(name, fixture_dir, transcript, expected)
-      _ -> evaluate_curator(name, fixture_dir, article_path, transcript, expected)
+    cond do
+      Map.get(expected, "kind") == "retrieval" ->
+        evaluate_retrieval(name, fixture_dir, transcript, expected)
+
+      File.exists?(failure_payload_path) ->
+        evaluate_verify_log(name, fixture_dir, failure_payload_path, transcript, expected)
+
+      true ->
+        evaluate_curator(name, fixture_dir, article_path, transcript, expected)
     end
   rescue
     error ->
@@ -107,6 +114,94 @@ defmodule CuratorEval do
       Application.delete_env(:symphony_elixir, :curator_critic_module)
     end
   end
+
+  defp evaluate_verify_log(name, fixture_dir, failure_payload_path, transcript, expected) do
+    {root, project_key} = setup_isolated_root!(fixture_dir)
+
+    Application.put_env(:symphony_elixir, :curator_failure_distiller_module, Distillers.Stub)
+    Application.put_env(:symphony_elixir, :curator_stub_response, transcript_to_response(transcript))
+    Application.put_env(:symphony_elixir, :curator_critic_module, Critics.Stub)
+    Application.put_env(:symphony_elixir, :curator_stub_critic, transcript_to_critic(transcript))
+
+    try do
+      seed_wiki!(fixture_dir, project_key)
+      payload = load_failure_payload!(failure_payload_path)
+
+      case Curator.learn_from_failure(payload, project_key: project_key) do
+        {:ok, proposal} ->
+          IO.puts("  proposal: #{format_decision(proposal)}")
+          result = assert_curator_outcome(name, proposal, project_key, expected)
+          assert_injection_guards(result, proposal, expected)
+
+        {:error, reason} ->
+          %{name: name, passed: false, reason: "curator error: #{inspect(reason)}"}
+      end
+    after
+      File.rm_rf(root)
+      Application.delete_env(:symphony_elixir, :curator_stub_response)
+      Application.delete_env(:symphony_elixir, :curator_failure_distiller_module)
+      Application.delete_env(:symphony_elixir, :curator_stub_critic)
+      Application.delete_env(:symphony_elixir, :curator_critic_module)
+    end
+  end
+
+  defp load_failure_payload!(path) do
+    data = path |> File.read!() |> Jason.decode!()
+
+    %{
+      recipe: %SymphonyElixir.Verification.Recipe{
+        description: Map.get(data, "recipe_description", ""),
+        steps: []
+      },
+      failed_step: %{
+        name: Map.fetch!(data["failed_step"], "name"),
+        shell: Map.fetch!(data["failed_step"], "shell"),
+        output: Map.fetch!(data["failed_step"], "output")
+      },
+      output: Map.fetch!(data["failed_step"], "output"),
+      issue_ref: Map.fetch!(data, "issue_ref"),
+      started_at: Map.fetch!(data, "started_at")
+    }
+  end
+
+  defp assert_injection_guards(%{passed: false} = result, _proposal, _expected), do: result
+
+  defp assert_injection_guards(result, proposal, expected) do
+    with :ok <- guard_not_slug(proposal, Map.get(expected, "must_not_create_slug")),
+         :ok <- guard_not_body(proposal, Map.get(expected, "must_not_contain_body")) do
+      result
+    else
+      {:error, reason} -> %{result | passed: false, reason: reason}
+    end
+  end
+
+  defp guard_not_slug(_proposal, nil), do: :ok
+
+  defp guard_not_slug(%{decision: {:create, slug, _entry}}, forbidden) when slug == forbidden do
+    {:error, "proposal created forbidden slug #{forbidden}"}
+  end
+
+  defp guard_not_slug(_proposal, _forbidden), do: :ok
+
+  defp guard_not_body(_proposal, nil), do: :ok
+
+  defp guard_not_body(%{decision: {:create, _, %Entry{body: body}}}, needle) do
+    if String.contains?(body, needle) do
+      {:error, "proposal body contains forbidden token #{inspect(needle)}"}
+    else
+      :ok
+    end
+  end
+
+  defp guard_not_body(%{decision: {:refine, _, body}}, needle) when is_binary(body) do
+    if String.contains?(body, needle) do
+      {:error, "proposal body contains forbidden token #{inspect(needle)}"}
+    else
+      :ok
+    end
+  end
+
+  defp guard_not_body(_proposal, _needle), do: :ok
 
   defp evaluate_retrieval(name, fixture_dir, transcript, expected) do
     {root, project_key} = setup_isolated_root!(fixture_dir)

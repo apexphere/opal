@@ -8,6 +8,7 @@ defmodule SymphonyElixir.Orchestrator do
   import Bitwise, only: [<<<: 2]
 
   alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Verification, Workspace}
+  alias SymphonyElixir.Curator.Queue, as: CuratorQueue
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -141,7 +142,7 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.info("Verification #{outcome.status} for issue_id=#{issue_id} issue_identifier=#{Map.get(entry, :identifier)} steps=#{length(steps)}")
 
         state = %{state | verifying: new_verifying}
-        state = apply_verification_outcome(state, issue_id, entry, outcome.status)
+        state = apply_verification_outcome(state, issue_id, entry, outcome.status, outcome)
 
         notify_dashboard()
         {:noreply, state}
@@ -256,7 +257,7 @@ defmodule SymphonyElixir.Orchestrator do
     Logger.warning("Verification task exited without result for issue_id=#{issue_id} reason=#{inspect(reason)}; treating as skipped")
 
     state = %{state | verifying: new_verifying}
-    state = apply_verification_outcome(state, issue_id, entry, :skipped)
+    state = apply_verification_outcome(state, issue_id, entry, :skipped, nil)
 
     notify_dashboard()
     {:noreply, state}
@@ -1021,8 +1022,12 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp apply_verification_outcome(%State{} = state, issue_id, entry, :fail) do
+  defp apply_verification_outcome(state, issue_id, entry, status),
+    do: apply_verification_outcome(state, issue_id, entry, status, nil)
+
+  defp apply_verification_outcome(%State{} = state, issue_id, entry, :fail, outcome) do
     revert_issue_state(issue_id)
+    maybe_cast_failure_to_curator(issue_id, entry, outcome)
 
     state
     |> complete_issue(issue_id)
@@ -1034,7 +1039,7 @@ defmodule SymphonyElixir.Orchestrator do
     })
   end
 
-  defp apply_verification_outcome(%State{} = state, issue_id, entry, _status) do
+  defp apply_verification_outcome(%State{} = state, issue_id, entry, _status, _outcome) do
     identifier = Map.get(entry, :identifier)
     worker_host = Map.get(entry, :worker_host)
 
@@ -1047,6 +1052,49 @@ defmodule SymphonyElixir.Orchestrator do
         completed: MapSet.put(state.completed, issue_id)
     }
   end
+
+  defp maybe_cast_failure_to_curator(issue_id, entry, outcome) do
+    cond do
+      not curator_auto_learn_enabled?() ->
+        :ok
+
+      not is_map(outcome) ->
+        :ok
+
+      true ->
+        case build_failure_payload(issue_id, entry, outcome) do
+          {:ok, payload} ->
+            CuratorQueue.cast_failure(payload)
+
+          :skip ->
+            :ok
+        end
+    end
+  end
+
+  defp curator_auto_learn_enabled? do
+    Application.get_env(:symphony_elixir, :curator_auto_learn_from_failures, true) == true
+  end
+
+  defp build_failure_payload(issue_id, entry, %{steps: steps, recipe: recipe, started_at: started_at})
+       when is_list(steps) and not is_nil(recipe) do
+    case Enum.find(steps, fn step -> Map.get(step, :passed) == false end) do
+      nil ->
+        :skip
+
+      failed_step ->
+        {:ok,
+         %{
+           recipe: recipe,
+           failed_step: failed_step,
+           output: Map.get(failed_step, :output, ""),
+           issue_ref: Map.get(entry, :identifier) || issue_id,
+           started_at: DateTime.to_iso8601(started_at)
+         }}
+    end
+  end
+
+  defp build_failure_payload(_issue_id, _entry, _outcome), do: :skip
 
   defp revert_issue_state(issue_id) when is_binary(issue_id) do
     active_states = Config.settings!().tracker.active_states

@@ -1,0 +1,9 @@
+{
+  "decision": "refine",
+  "target_slug": "credo-refactor-opportunities",
+  "merged_body": "# Credo refactor opportunities\n\nCredo in `--strict` mode flags several refactor opportunities. Common ones:\n\n- `Credo.Check.Refactor.Nesting` — caps nesting at 2 (the default). Violations at nesting level 5 indicate deeply nested conditionals that should be split into helpers.\n- `Credo.Check.Refactor.CyclomaticComplexity` — caps branching.\n\nFix by extracting helpers or reducing branching. When a helper is the right call, give it a verb name that captures the branch it replaces (e.g. `dispatch_issue_by_state/2`).\n",
+  "rationale": "existing entry already covers the rule; add concrete nesting-level guidance",
+  "critic": {
+    "verdict": "approve"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "decision": "create",
+  "slug": "undefined-function-error-missing-public-api",
+  "title": "UndefinedFunctionError when exporting new Curator APIs",
+  "topic": "elixir/public-api",
+  "body": "# UndefinedFunctionError: missing public API export\n\nWhen adding a new function to `SymphonyElixir.Curator`, ensure the module is recompiled and that the function is actually exported (public `def`, not `defp`). An `UndefinedFunctionError` at test time almost always means either the compile is stale or a `def` was accidentally written as `defp`.\n\nResolution checklist:\n- Rerun `mix compile --force`.\n- Confirm the arity matches the caller's arity.\n- Check the `@spec` is emitted and not only the `@doc false` clause.\n",
+  "rationale": "novel failure mode — no existing entry covers this",
+  "critic": {
+    "verdict": "approve"
+  }
+}

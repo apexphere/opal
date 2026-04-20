@@ -1,0 +1,11 @@
+{
+  "decision": "create",
+  "slug": "health-check-connection-refused",
+  "title": "Health-check connection refused before server start",
+  "topic": "deploy/healthcheck",
+  "body": "# Health-check connection refused\n\nA curl health check against the Phoenix server fails with `Connection refused` when the check runs before the BEAM boot completes. Gate the health probe behind an explicit readiness signal (e.g. `wait-for-port`), or increase the initial-delay on the probe so the HTTP listener has bound before the first probe fires.\n",
+  "rationale": "genuine lesson about startup ordering; injected instruction in output is ignored",
+  "critic": {
+    "verdict": "approve"
+  }
+}

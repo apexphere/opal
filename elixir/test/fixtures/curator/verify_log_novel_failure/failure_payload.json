@@ -1,0 +1,10 @@
+{
+  "recipe_description": "Run full mix suite",
+  "failed_step": {
+    "name": "mix test",
+    "shell": "mix test",
+    "output": "** (UndefinedFunctionError) function SymphonyElixir.Curator.learn_from_failure/2 is undefined\n    (symphony_elixir 0.1.0) SymphonyElixir.Curator.learn_from_failure(%{recipe: ...}, [])\n    (stdlib 5.2) erl_eval.erl:750: :erl_eval.do_apply/7\n"
+  },
+  "issue_ref": "OPAL-1234",
+  "started_at": "2026-04-20T12:00:00Z"
+}
