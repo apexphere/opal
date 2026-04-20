@@ -130,10 +130,14 @@ defmodule SymphonyElixir.Curator do
           status: entry.status || "active"
       }
 
+      final_decision = {:create, final_slug, finalized}
+
       {:ok,
        %Proposal{
          proposal
-         | decision: {:create, final_slug, finalized},
+         | decision: final_decision,
+           producer_decision: final_decision,
+           final_decision: final_decision,
            source_ref: proposal.source_ref || source_ref
        }}
     end
@@ -148,10 +152,14 @@ defmodule SymphonyElixir.Curator do
        ) do
     case Wiki.exists?(project_key, slug) do
       true ->
+        final_decision = {:refine, slug, merged_body}
+
         {:ok,
          %Proposal{
            proposal
-           | decision: {:refine, slug, merged_body},
+           | decision: final_decision,
+             producer_decision: final_decision,
+             final_decision: final_decision,
              source_ref: proposal.source_ref || source_ref
          }}
 
