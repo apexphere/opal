@@ -182,6 +182,7 @@ defmodule SymphonyElixir.Curator.Review do
       _ -> ""
     end
   end
+
   defp identity(value), do: value
 
   defp iso8601_now, do: DateTime.utc_now() |> DateTime.to_iso8601()
