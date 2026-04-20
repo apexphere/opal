@@ -176,7 +176,12 @@ defmodule SymphonyElixir.Curator.Review do
     %Proposal{proposal | decision: {:refine, slug, new_body}}
   end
 
-  defp default_gets(prompt), do: IO.gets(prompt) || ""
+  defp default_gets(prompt) do
+    case IO.gets(prompt) do
+      data when is_binary(data) -> data
+      _ -> ""
+    end
+  end
   defp identity(value), do: value
 
   defp iso8601_now, do: DateTime.utc_now() |> DateTime.to_iso8601()
