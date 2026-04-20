@@ -10,6 +10,12 @@ defmodule SymphonyElixir.Curator.Review do
   On accept (`a` or `e` after edit), calls `Wiki.put/2`. On reject/quit,
   no wiki write happens.
 
+  When producer and critic disagree, the consolidator emits a
+  `:human_review` final decision. The CLI surfaces both views (producer's
+  proposed diff + critic's stated reason) and uses a simpler prompt —
+  `[a]ccept (force write) / [q]uit` — because the critic already said this
+  shouldn't land cleanly.
+
   The IO module is injected so this is unit-testable; production uses the
   default `IO`.
   """
@@ -42,6 +48,9 @@ defmodule SymphonyElixir.Curator.Review do
     case proposal.decision do
       :reject ->
         :rejected
+
+      {:human_review, _producer, _verdict} ->
+        human_review_loop(io, input_fun, proposal, project_key)
 
       _ ->
         prompt_loop(io, input_fun, editor_fun, proposal, project_key)
@@ -112,6 +121,53 @@ defmodule SymphonyElixir.Curator.Review do
         io.puts("(Could not read current entry: #{inspect(reason)})")
         io.puts(unified_diff("", merged_body, "wiki/#{slug}.md"))
     end
+  end
+
+  defp render_proposal(io, %Proposal{decision: {:human_review, producer, verdict}}, project_key) do
+    io.puts("Curator decision: HUMAN REVIEW (producer and critic disagree)")
+    io.puts("Project: #{project_key}")
+    io.puts("Critic verdict: #{format_verdict(verdict)}")
+    io.puts("")
+    io.puts("Producer would have proposed:")
+    render_producer_view(io, producer, project_key)
+  end
+
+  defp render_producer_view(io, {:create, slug, %Entry{} = entry}, _project_key) do
+    io.puts("  CREATE slug=#{slug} title=#{entry.title} topic=#{entry.topic}")
+    io.puts(unified_diff("", Entry.serialize(entry), "wiki/#{slug}.md"))
+  end
+
+  defp render_producer_view(io, {:refine, slug, merged_body}, project_key) do
+    io.puts("  REFINE slug=#{slug}")
+
+    case Wiki.get(project_key, slug) do
+      {:ok, current} ->
+        io.puts(unified_diff(current.body, merged_body, "wiki/#{slug}.md"))
+
+      {:error, reason} ->
+        io.puts("(Could not read current entry: #{inspect(reason)})")
+        io.puts(unified_diff("", merged_body, "wiki/#{slug}.md"))
+    end
+  end
+
+  defp format_verdict(:approve), do: "approve"
+  defp format_verdict({:reject, reason}), do: "reject — #{reason}"
+  defp format_verdict({:conflict, slug, reason}), do: "conflict with #{slug} — #{reason}"
+  defp format_verdict(nil), do: "(none)"
+
+  defp human_review_loop(io, input_fun, proposal, project_key) do
+    io.puts("")
+    answer = input_fun.("[a]ccept (force write) / [q]uit > ")
+
+    case String.trim(String.downcase(answer)) do
+      "a" -> apply_human_review(io, proposal, project_key)
+      "q" -> :quit
+      _ -> human_review_loop(io, input_fun, proposal, project_key)
+    end
+  end
+
+  defp apply_human_review(io, %Proposal{decision: {:human_review, producer, _verdict}} = proposal, project_key) do
+    apply_proposal(io, %Proposal{proposal | decision: producer}, project_key)
   end
 
   defp prompt_loop(io, input_fun, editor_fun, proposal, project_key) do

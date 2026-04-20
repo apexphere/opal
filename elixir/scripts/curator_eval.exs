@@ -11,7 +11,8 @@
 #
 # Exits 0 on full pass, 1 on any failure. Prints a per-fixture summary.
 
-fixtures_dir = Path.join([File.cwd!(), "test/fixtures/curator"])
+curator_fixtures = Path.join([File.cwd!(), "test/fixtures/curator"])
+critic_fixtures = Path.join([File.cwd!(), "test/fixtures/critic"])
 
 defmodule CuratorEval do
   alias SymphonyElixir.Curator
@@ -21,12 +22,20 @@ defmodule CuratorEval do
 
   @project_key "github_apexphere_curator-eval"
 
-  def run_all(dir) do
+  def run_all(dirs) when is_list(dirs) do
     fixtures =
-      dir
-      |> File.ls!()
-      |> Enum.map(&Path.join(dir, &1))
-      |> Enum.filter(&File.dir?/1)
+      dirs
+      |> Enum.flat_map(fn dir ->
+        case File.ls(dir) do
+          {:ok, entries} ->
+            entries
+            |> Enum.map(&Path.join(dir, &1))
+            |> Enum.filter(&File.dir?/1)
+
+          _ ->
+            []
+        end
+      end)
       |> Enum.sort()
 
     results = Enum.map(fixtures, &run_one/1)
@@ -197,6 +206,11 @@ defmodule CuratorEval do
       {:reject, "refine_or_reject"} ->
         %{name: name, passed: true, reason: nil}
 
+      {{:human_review, _producer, _verdict}, "human_review"} ->
+        # Confirm quit path does not write.
+        :quit = Review.run(proposal, project_key, input_fun: fn _ -> "q" end)
+        %{name: name, passed: true, reason: nil}
+
       {actual, expected_decision} ->
         %{name: name, passed: false, reason: "decision mismatch: #{inspect(actual)} vs #{expected_decision}"}
     end
@@ -322,4 +336,4 @@ if Process.whereis(SymphonyElixir.WorkflowStore) do
   SymphonyElixir.WorkflowStore.force_reload()
 end
 
-CuratorEval.run_all(fixtures_dir)
+CuratorEval.run_all([curator_fixtures, critic_fixtures])
