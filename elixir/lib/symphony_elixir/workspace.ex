@@ -272,9 +272,8 @@ defmodule SymphonyElixir.Workspace do
     if File.dir?(git_dir) do
       branch = resolve_branch_name(issue_context)
 
-      with :ok <- create_git_branch_local(workspace, branch),
-           :ok <- install_pre_push_hook_local(git_dir) do
-        :ok
+      with :ok <- create_git_branch_local(workspace, branch) do
+        install_pre_push_hook_local(git_dir)
       end
     else
       :ok
@@ -340,9 +339,8 @@ defmodule SymphonyElixir.Workspace do
     hook_content = String.trim_trailing(@pre_push_hook_script)
 
     with :ok <- File.mkdir_p(hooks_dir),
-         :ok <- File.write(hook_path, hook_content <> "\n"),
-         :ok <- File.chmod(hook_path, 0o755) do
-      :ok
+         :ok <- File.write(hook_path, hook_content <> "\n") do
+      File.chmod(hook_path, 0o755)
     end
   end
 
