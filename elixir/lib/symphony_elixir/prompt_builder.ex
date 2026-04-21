@@ -69,7 +69,12 @@ defmodule SymphonyElixir.PromptBuilder do
       |> prompt_template!()
       |> parse_template!()
 
-    issue_map = issue |> Map.from_struct() |> to_solid_map()
+    issue_map =
+      issue
+      |> Map.from_struct()
+      |> Map.update!(:labels, &join_issue_labels/1)
+      |> to_solid_map()
+
     task_map = Map.put(issue_map, "number", Map.get(issue_map, "identifier"))
 
     rendered =
@@ -125,16 +130,18 @@ defmodule SymphonyElixir.PromptBuilder do
   end
 
   defp to_solid_map(map) when is_map(map) do
-    map
-    |> Map.new(fn {key, value} -> {to_string(key), to_solid_value(value)} end)
-    |> join_labels()
+    Map.new(map, fn {key, value} -> {to_string(key), to_solid_value(value)} end)
   end
 
-  defp join_labels(%{"labels" => labels} = map) when is_list(labels) do
-    %{map | "labels" => Enum.join(labels, ", ")}
+  defp join_issue_labels(labels) when is_list(labels) do
+    if Enum.all?(labels, &is_binary/1) do
+      Enum.join(labels, ", ")
+    else
+      labels
+    end
   end
 
-  defp join_labels(map), do: map
+  defp join_issue_labels(other), do: other
 
   defp to_solid_value(%DateTime{} = value), do: DateTime.to_iso8601(value)
   defp to_solid_value(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
