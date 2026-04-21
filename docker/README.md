@@ -63,10 +63,11 @@ The entrypoint picks the first match it finds:
 
 The default WORKFLOW.md ships with `tracker.kind: github`, `agent.runtime:
 claude-code`, an `after_create` hook that runs `git clone /project .` inside
-each new issue workspace, required self-verification, and an empty prompt body
-— which causes Opal to use its built-in generic project-adaptive prompt. That
-prompt tells the agent to read your project's `CLAUDE.md` / `AGENTS.md` /
-`README.md` / `CONTRIBUTING.md` and follow them as authoritative.
+each new issue workspace, required self-verification, a recipe critic gate, and
+an empty prompt body — which causes Opal to use its built-in generic
+project-adaptive prompt. That prompt tells the agent to read your project's
+`CLAUDE.md` / `AGENTS.md` / `README.md` / `CONTRIBUTING.md` and follow them as
+authoritative.
 
 In other words: a project with no Opal-specific config gets sensible defaults.
 A project that wants to customize anything just drops a `WORKFLOW.md` at its
@@ -99,8 +100,9 @@ Common overrides:
 - `agent.max_concurrent_agents` raises or lowers the number of issues Opal may work at once.
 - `hooks.after_create` can replace the default `git clone /project .` bootstrap if a project needs
   a different checkout or setup flow.
-- `verification.enabled` and `verification.required` can be set to `false` for a project that needs
-  to temporarily opt out of the default self-verification gate.
+- `verification.enabled`, `verification.required`, and `verification.critic_enabled` can be set to
+  `false` for a project that needs to temporarily opt out of the default self-verification gate or
+  recipe critic.
 
 ## Image contents
 
@@ -108,3 +110,4 @@ Common overrides:
 - Opal escript at `/usr/local/bin/opal`
 - `git`, `openssh-client`, `nodejs`, `npm`
 - `claude` CLI from `@anthropic-ai/claude-code`
+- `codex` CLI from `@openai/codex` for verification recipe criticism

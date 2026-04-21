@@ -1320,6 +1320,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert settings.verification.enabled == true
     assert settings.verification.required == true
     assert settings.verification.step_timeout_ms == 600_000
+    assert settings.verification.critic_enabled == true
   end
 
   test "schema defaults verification to disabled with 10-minute timeout" do
@@ -1335,6 +1336,43 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              Schema.parse(%{verification: %{step_timeout_ms: 0}})
 
     assert message =~ "verification.step_timeout_ms"
+  end
+
+  test "schema defaults verification critic to off with 180s timeout" do
+    assert {:ok, settings} = Schema.parse(%{})
+
+    assert settings.verification.critic_enabled == false
+    assert settings.verification.critic_timeout_ms == 180_000
+    assert settings.verification.critic_max_rejections == 2
+  end
+
+  test "schema parses verification critic fields" do
+    assert {:ok, settings} =
+             Schema.parse(%{
+               verification: %{
+                 critic_enabled: true,
+                 critic_timeout_ms: 30_000,
+                 critic_max_rejections: 5
+               }
+             })
+
+    assert settings.verification.critic_enabled == true
+    assert settings.verification.critic_timeout_ms == 30_000
+    assert settings.verification.critic_max_rejections == 5
+  end
+
+  test "schema rejects non-positive verification critic_timeout_ms" do
+    assert {:error, {:invalid_workflow_config, message}} =
+             Schema.parse(%{verification: %{critic_timeout_ms: 0}})
+
+    assert message =~ "verification.critic_timeout_ms"
+  end
+
+  test "schema rejects negative verification critic_max_rejections" do
+    assert {:error, {:invalid_workflow_config, message}} =
+             Schema.parse(%{verification: %{critic_max_rejections: -1}})
+
+    assert message =~ "verification.critic_max_rejections"
   end
 
   test "schema parses workspace branch_pattern" do

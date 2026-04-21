@@ -130,6 +130,67 @@ defmodule SymphonyElixir.Verification.FeedbackTest do
     assert byte_size(captured) <= 4 * 1024
   end
 
+  describe "rejected status" do
+    test "renders a critic-rejection block with reason and missing coverage",
+         %{workspace: workspace} do
+      write_log!(workspace, %{
+        "status" => "rejected",
+        "steps" => [],
+        "rejection" => %{
+          "reason" => "only runs unit tests, no HTTP exercise",
+          "missing_coverage" => "the --json flag is never invoked"
+        }
+      })
+
+      assert {:ok, block} = Feedback.render(workspace)
+      assert block =~ "## Your previous verify.json was rejected by an independent critic"
+      assert block =~ "Reason: only runs unit tests, no HTTP exercise"
+      assert block =~ "Missing coverage: the --json flag is never invoked"
+      assert block =~ "Full log: `.opal/verify-log.json`."
+    end
+
+    test "omits the missing-coverage line when empty", %{workspace: workspace} do
+      write_log!(workspace, %{
+        "status" => "rejected",
+        "steps" => [],
+        "rejection" => %{
+          "reason" => "recipe is trivially green",
+          "missing_coverage" => ""
+        }
+      })
+
+      assert {:ok, block} = Feedback.render(workspace)
+      assert block =~ "Reason: recipe is trivially green"
+      refute block =~ "Missing coverage:"
+    end
+
+    test "tolerates a missing rejection field (defensive default)",
+         %{workspace: workspace} do
+      write_log!(workspace, %{"status" => "rejected", "steps" => []})
+
+      assert {:ok, block} = Feedback.render(workspace)
+      # No reason or missing_coverage lines — just the heading and boilerplate.
+      refute block =~ "Reason:"
+      refute block =~ "Missing coverage:"
+      assert block =~ "## Your previous verify.json was rejected"
+    end
+
+    test "trims whitespace from reason and missing_coverage", %{workspace: workspace} do
+      write_log!(workspace, %{
+        "status" => "rejected",
+        "steps" => [],
+        "rejection" => %{
+          "reason" => "  padded reason  \n",
+          "missing_coverage" => "\t tabbed \n"
+        }
+      })
+
+      assert {:ok, block} = Feedback.render(workspace)
+      assert block =~ "Reason: padded reason\n"
+      assert block =~ "Missing coverage: tabbed\n"
+    end
+  end
+
   defp write_log!(workspace, payload) do
     write_log_raw!(workspace, Jason.encode!(payload))
   end

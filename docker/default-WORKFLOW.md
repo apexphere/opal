@@ -25,6 +25,7 @@ verification:
   enabled: true
   required: true
   step_timeout_ms: 600000
+  critic_enabled: true
 claude_code:
   command: claude
   permission_mode: acceptEdits

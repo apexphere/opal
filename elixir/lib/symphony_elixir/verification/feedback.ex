@@ -47,7 +47,37 @@ defmodule SymphonyElixir.Verification.Feedback do
     {:ok, build_block(data)}
   end
 
+  defp render_from_payload(%{"status" => "rejected"} = data) do
+    {:ok, build_rejection_block(data)}
+  end
+
   defp render_from_payload(_other), do: :none
+
+  defp build_rejection_block(data) do
+    rejection = Map.get(data, "rejection") || %{}
+    reason = rejection |> Map.get("reason") |> to_nonempty_string()
+    missing = rejection |> Map.get("missing_coverage") |> to_nonempty_string()
+
+    [
+      "## Your previous verify.json was rejected by an independent critic\n",
+      "The critic judged the recipe inadequate — it would likely pass even",
+      " if the delivered behaviour were absent. Rewrite `.opal/verify.json`",
+      " so it exercises the user-visible behaviour named below.\n",
+      rejection_reason_line(reason),
+      rejection_missing_line(missing),
+      "\nFull log: `.opal/verify-log.json`.\n"
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  defp rejection_reason_line(""), do: ""
+  defp rejection_reason_line(reason), do: "\n- Reason: #{reason}"
+
+  defp rejection_missing_line(""), do: ""
+  defp rejection_missing_line(missing), do: "\n- Missing coverage: #{missing}"
+
+  defp to_nonempty_string(nil), do: ""
+  defp to_nonempty_string(value) when is_binary(value), do: String.trim(value)
 
   defp build_block(%{"steps" => [_ | _] = steps} = _data) do
     step = Enum.find(steps, fn s -> Map.get(s, "passed") == false end)

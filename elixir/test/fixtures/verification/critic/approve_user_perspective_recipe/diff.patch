@@ -1,0 +1,35 @@
+diff --git a/elixir/lib/symphony_elixir/workspace.ex b/elixir/lib/symphony_elixir/workspace.ex
+index 1111111..2222222 100644
+--- a/elixir/lib/symphony_elixir/workspace.ex
++++ b/elixir/lib/symphony_elixir/workspace.ex
+@@ -42,6 +42,7 @@ defmodule SymphonyElixir.Workspace do
+   def create_for_issue(issue, opts) do
+     with {:ok, path} <- ensure_clone(issue, opts),
+          :ok <- run_after_create(path, opts),
++         :ok <- ensure_branch(path, issue, opts),
+          do: {:ok, path}
+   end
+
+@@ -88,4 +89,24 @@ defmodule SymphonyElixir.Workspace do
+       {:error, reason} -> {:error, {:after_create_failed, reason}}
+     end
+   end
++
++  defp ensure_branch(path, issue, opts) do
++    pattern = Keyword.get(opts, :branch_pattern, "opal/{number}")
++    branch = String.replace(pattern, "{number}", to_string(issue.number))
++
++    case System.cmd("git", ["-C", path, "rev-parse", "--verify", branch],
++           stderr_to_stdout: true
++         ) do
++      {_, 0} ->
++        :ok
++
++      {_, _} ->
++        case System.cmd("git", ["-C", path, "checkout", "-b", branch], stderr_to_stdout: true) do
++          {_, 0} -> :ok
++          {out, status} -> {:error, {:branch_failed, status, out}}
++        end
++    end
++  end
+ end

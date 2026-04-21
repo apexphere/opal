@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "name": "compile",
+      "run": "mix compile --warnings-as-errors",
+      "expect_exit": 0
+    },
+    {
+      "name": "unit tests",
+      "run": "mix test test/symphony_elixir/workspace_and_config_test.exs",
+      "expect_exit": 0
+    }
+  ]
+}

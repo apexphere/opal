@@ -21,8 +21,15 @@ defmodule SymphonyElixir.Verification.Result do
       "duration_ms" => DateTime.diff(outcome.finished_at, outcome.started_at, :millisecond),
       "skipped_reason" => encode_reason(outcome.skipped_reason),
       "recipe" => encode_recipe(outcome.recipe),
+      "rejection" => encode_rejection(Map.get(outcome, :rejection)),
       "steps" => Enum.map(outcome.steps, &encode_step/1)
     }
+  end
+
+  defp encode_rejection(nil), do: nil
+
+  defp encode_rejection(%{reason: reason, missing_coverage: missing}) do
+    %{"reason" => reason, "missing_coverage" => missing}
   end
 
   defp encode_step(step) do
