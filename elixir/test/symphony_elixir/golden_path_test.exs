@@ -70,6 +70,8 @@ defmodule SymphonyElixir.GoldenPathTest do
 
     defp mark_issue_closed!(%Issue{} = issue) do
       closed = %Issue{issue | state: "Closed", labels: []}
+      # Seed future fetches with the terminal issue while also emitting the
+      # tracker transition event the test asserts.
       Application.put_env(:symphony_elixir, :memory_tracker_issues, [closed])
       :ok = SymphonyElixir.Tracker.update_issue_state(issue.id, "Closed")
     end
