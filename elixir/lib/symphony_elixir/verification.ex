@@ -105,9 +105,15 @@ defmodule SymphonyElixir.Verification do
 
     case run_critic(task_summary, diff, recipe_json, settings) do
       {:ok, :approve} ->
+        Logger.info("Verification critic approved recipe")
         :approve
 
-      {:ok, {:reject, %{reason: _, missing_coverage: _} = rejection}} ->
+      {:ok, {:reject, %{reason: reason, missing_coverage: missing} = rejection}} ->
+        Logger.info(
+          "Verification critic rejected recipe: #{inspect(reason)} " <>
+            "missing_coverage=#{inspect(missing)}"
+        )
+
         {:reject, rejection}
 
       {:error, reason} ->
