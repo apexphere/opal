@@ -1,0 +1,11 @@
+{
+  "decision": "create",
+  "slug": "macd-rsi-kdj-triple-indicator",
+  "title": "MACD/RSI/KDJ triple-indicator reading",
+  "topic": "indicators/momentum",
+  "body": "# MACD/RSI/KDJ triple-indicator reading\n\n- **MACD** shows trend direction (slowest; main trend).\n- **RSI** shows overbought/oversold (mid sensitivity; entry/exit).\n- **KDJ** shows short-term turning points (fastest; swing timing).\n\n## Triple resonance (strongest signal)\n\n- Long resonance: MACD golden cross or bullish divergence + RSI <30 or crossing above 50 + KDJ K<30 golden cross or J<0.\n- Short resonance: MACD death cross or bearish divergence + RSI >70 or crossing below 50 + KDJ K>70 death cross or J>100.\n\n## Priority when indicators disagree\n\n1. Trend first (MACD): in confirmed uptrends, ignore RSI/KDJ overbought flags.\n2. Extremes first (RSI<20/>80 or KDJ<0/>100): respect extreme-zone signals even when MACD has not turned.\n3. Divergence wins: price-vs-indicator divergence is the most reliable signal; trust it over other readings.\n",
+  "rationale": "novel topic for a trading-indicators project — existing wiki has no coverage of MACD/RSI/KDJ interplay",
+  "critic": {
+    "verdict": "approve"
+  }
+}

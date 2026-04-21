@@ -20,7 +20,9 @@ defmodule SymphonyElixir.Curator.Distiller do
   @type input :: %{
           required(:body) => String.t(),
           required(:source_ref) => String.t(),
-          required(:ingested_at) => String.t()
+          required(:ingested_at) => String.t(),
+          required(:project_key) => String.t(),
+          required(:project_description) => String.t() | nil
         }
 
   @type candidate :: Entry.t()

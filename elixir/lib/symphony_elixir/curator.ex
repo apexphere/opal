@@ -19,6 +19,7 @@ defmodule SymphonyElixir.Curator do
   """
 
   alias SymphonyElixir.Curator.{Consolidator, Proposal}
+  alias SymphonyElixir.Knowledge
   alias SymphonyElixir.Wiki
   alias SymphonyElixir.Wiki.{Entry, Store}
 
@@ -28,6 +29,7 @@ defmodule SymphonyElixir.Curator do
 
   @type opts :: [
           project_key: String.t(),
+          project_description: String.t() | nil,
           source_ref: String.t() | nil,
           distiller: module() | nil,
           critic: module() | nil,
@@ -95,6 +97,7 @@ defmodule SymphonyElixir.Curator do
 
   defp do_learn(raw_body, opts) when is_binary(raw_body) do
     project_key = Keyword.fetch!(opts, :project_key)
+    project_description = Keyword.get_lazy(opts, :project_description, &Knowledge.project_description/0)
     source_ref = Keyword.fetch!(opts, :source_ref)
     source_kind = Keyword.fetch!(opts, :source_kind)
     distiller = Keyword.fetch!(opts, :distiller)
@@ -105,9 +108,16 @@ defmodule SymphonyElixir.Curator do
     with {:ok, summaries} <- Wiki.list_summaries(project_key),
          capped_summaries <- maybe_filter_summaries(summaries, raw_body),
          {:ok, candidates} <- load_candidates(project_key, raw_body, capped_summaries),
-         input <- %{body: raw_body, source_ref: source_ref, ingested_at: now},
+         input <- %{
+           body: raw_body,
+           source_ref: source_ref,
+           ingested_at: now,
+           project_key: project_key,
+           project_description: project_description
+         },
+         context <- %{project_key: project_key, project_description: project_description},
          {:ok, proposal, verdict} <-
-           run_fanout(distiller, critic, input, capped_summaries, candidates),
+           run_fanout(distiller, critic, input, capped_summaries, candidates, context),
          {:ok, sanitized} <-
            sanitize_proposal(proposal, project_key, source_ref, source_kind, now) do
       {:ok, Consolidator.decide(sanitized, verdict)}
@@ -141,10 +151,10 @@ defmodule SymphonyElixir.Curator do
     end
   end
 
-  defp run_fanout(distiller, critic, input, summaries, candidates) do
+  defp run_fanout(distiller, critic, input, summaries, candidates, context) do
     jobs = [
       fn -> {:distill, distiller.distill(input, summaries, candidates)} end,
-      fn -> {:critique, critic.critique(input.body, summaries, candidates)} end
+      fn -> {:critique, critic.critique(input.body, summaries, candidates, context)} end
     ]
 
     results =

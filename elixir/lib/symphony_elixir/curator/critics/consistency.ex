@@ -19,8 +19,8 @@ defmodule SymphonyElixir.Curator.Critics.Consistency do
   alias SymphonyElixir.Wiki.Entry
 
   @impl true
-  def critique(article_body, summaries, candidates) do
-    prompt = build_prompt(article_body, summaries, candidates)
+  def critique(article_body, summaries, candidates, context) do
+    prompt = build_prompt(article_body, summaries, candidates, context)
 
     case run_claude(command(), prompt) do
       {:ok, raw_output} ->
@@ -33,8 +33,9 @@ defmodule SymphonyElixir.Curator.Critics.Consistency do
   end
 
   @doc false
-  @spec build_prompt(String.t(), [Entry.summary()], [Entry.t()]) :: String.t()
-  def build_prompt(article_body, summaries, candidates) do
+  @spec build_prompt(String.t(), [Entry.summary()], [Entry.t()], SymphonyElixir.Curator.Critic.context()) ::
+          String.t()
+  def build_prompt(article_body, summaries, candidates, context) do
     summaries_section =
       Enum.map_join(summaries, "\n", &"- #{&1.slug} | #{&1.topic} | #{&1.title} | #{&1.one_line}")
 
@@ -49,11 +50,15 @@ defmodule SymphonyElixir.Curator.Critics.Consistency do
         """
       end)
 
+    project_framing = project_framing(context)
+
     """
-    You are Opal's curator critic — an independent reviewer. Your job is NOT
-    to propose how to merge. Your job is to flag whether the article
-    CONTRADICTS existing knowledge, is fundamentally irrelevant / one-off,
-    or is clean.
+    You are an independent reviewer for #{project_framing}'s knowledge wiki.
+    Your job is NOT to propose how to merge. Your job is to flag whether
+    the article CONTRADICTS existing knowledge, is fundamentally
+    irrelevant to the project / one-off, or is clean. Judge relevance
+    against the project described above — not against any specific tool
+    or platform you know about.
 
     Existing entry summaries (one per line: slug | topic | title | one-line):
     #{summaries_section}
@@ -150,5 +155,17 @@ defmodule SymphonyElixir.Curator.Critics.Consistency do
 
   defp build_verdict(payload, _candidates) do
     {:error, {:unknown_verdict, Map.get(payload, "verdict")}}
+  end
+
+  defp project_framing(context) do
+    key = Map.get(context, :project_key) || "this project"
+
+    case Map.get(context, :project_description) do
+      desc when is_binary(desc) and desc != "" ->
+        "project `#{key}` (#{desc})"
+
+      _ ->
+        "project `#{key}`"
+    end
   end
 end

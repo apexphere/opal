@@ -72,6 +72,22 @@ defmodule SymphonyElixir.Knowledge do
     Config.settings!().tracker |> project_key_for()
   end
 
+  @doc """
+  Optional free-text description of the current project, used by the curator
+  to frame LLM prompts with domain context (e.g. "Stock and crypto technical
+  analysis"). Configured via
+  `Application.put_env(:symphony_elixir, :curator_project_description, "...")`.
+
+  Returns `nil` when unset — callers should fall back to the project key.
+  """
+  @spec project_description() :: String.t() | nil
+  def project_description do
+    case Application.get_env(:symphony_elixir, :curator_project_description) do
+      nil -> nil
+      value when is_binary(value) -> value
+    end
+  end
+
   @spec project_key_for(map() | struct()) :: String.t()
   def project_key_for(tracker) do
     kind = Map.get(tracker, :kind) || "unknown"

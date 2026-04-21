@@ -1,6 +1,6 @@
 # Vision
 
-**Opal makes Claude Code trustworthy enough to walk away from.** It verifies its own work, learns the project across weeks, and runs on a subscription instead of an API bill.
+**Opal is a self-evolving agent on a Claude subscription, designed to work in any domain.** It starts by learning, improves by doing, and becomes trustworthy enough to walk away from.
 
 This document is the north star for Opal's development. When scoping a feature, ask which pillar it serves. Proposals that don't serve self-verifying, self-learning, or subscription-native are probably not vision-critical.
 

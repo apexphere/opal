@@ -53,9 +53,15 @@ defmodule SymphonyElixir.Curator.Distillers.Article do
         """
       end)
 
+    project_framing = project_framing(input)
+
     """
-    You are Opal's curator. Decide whether an article should add or refine an
-    entry in the project's wiki, or be rejected as irrelevant.
+    You are curating knowledge for #{project_framing}. Decide whether this
+    article should add or refine an entry in that project's wiki, or be
+    rejected as irrelevant to the project. Judge relevance against the
+    project described above — not against any specific tool or platform
+    you know about. If the article is on-topic for the project, treat it
+    as in-scope even when the subject matter is unfamiliar.
 
     Existing entry summaries (one per line: slug | topic | title | one-line):
     #{summaries_section}
@@ -117,4 +123,16 @@ defmodule SymphonyElixir.Curator.Distillers.Article do
   @doc false
   @spec timeout_ms() :: pos_integer()
   def timeout_ms, do: @default_timeout_ms
+
+  defp project_framing(input) do
+    key = Map.get(input, :project_key) || "this project"
+
+    case Map.get(input, :project_description) do
+      desc when is_binary(desc) and desc != "" ->
+        "project `#{key}` (#{desc})"
+
+      _ ->
+        "project `#{key}`"
+    end
+  end
 end
