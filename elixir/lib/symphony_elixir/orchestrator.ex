@@ -10,6 +10,7 @@ defmodule SymphonyElixir.Orchestrator do
   alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Verification, Workspace}
   alias SymphonyElixir.Curator.Queue, as: CuratorQueue
   alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixir.Verification.CriticContext
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -39,6 +40,7 @@ defmodule SymphonyElixir.Orchestrator do
       completed: MapSet.new(),
       claimed: MapSet.new(),
       retry_attempts: %{},
+      critic_rejection_attempts: %{},
       codex_totals: nil,
       codex_rate_limits: nil
     ]
@@ -381,6 +383,18 @@ defmodule SymphonyElixir.Orchestrator do
   @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host)
+  end
+
+  @doc false
+  @spec apply_verification_outcome_for_test(term(), String.t(), map(), atom(), map() | nil) :: term()
+  def apply_verification_outcome_for_test(%State{} = state, issue_id, entry, status, outcome) do
+    apply_verification_outcome(state, issue_id, entry, status, outcome)
+  end
+
+  @doc false
+  @spec build_verify_settings_for_test(map(), map(), Path.t() | nil) :: map()
+  def build_verify_settings_for_test(settings, metadata, workspace_path) do
+    build_verify_settings(settings, metadata, workspace_path)
   end
 
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
@@ -906,7 +920,9 @@ defmodule SymphonyElixir.Orchestrator do
         verify_metadata = %{
           identifier: issue.identifier || Map.get(metadata, :identifier),
           worker_host: Map.get(metadata, :worker_host),
-          workspace_path: Map.get(metadata, :workspace_path)
+          workspace_path: Map.get(metadata, :workspace_path),
+          issue_title: issue.title,
+          issue_description: issue.description
         }
 
         {:noreply, start_verification(state, issue_id, verify_metadata)}
@@ -1000,9 +1016,10 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp spawn_verification_task(%State{} = state, issue_id, metadata, workspace_path, settings) do
     parent = self()
+    verify_settings = build_verify_settings(settings, metadata, workspace_path)
 
     task_fun = fn ->
-      outcome = Verification.verify(workspace_path, settings)
+      outcome = Verification.verify(workspace_path, verify_settings)
       send(parent, {:verification_done, issue_id, outcome})
     end
 
@@ -1025,13 +1042,33 @@ defmodule SymphonyElixir.Orchestrator do
   defp apply_verification_outcome(state, issue_id, entry, status),
     do: apply_verification_outcome(state, issue_id, entry, status, nil)
 
-  # Critic-rejected recipes are treated as :fail for now. A follow-up commit
-  # (#42 commit 4) will thread the rejection reason + missing_coverage into
-  # the feedback loop so the next agent turn learns what was missing. For
-  # the moment this alias keeps the orchestrator pattern-match exhaustive
-  # and sends the issue back through the normal retry path.
   defp apply_verification_outcome(%State{} = state, issue_id, entry, :rejected, outcome) do
-    apply_verification_outcome(state, issue_id, entry, :fail, outcome)
+    prior_rejections = Map.get(state.critic_rejection_attempts, issue_id, 0)
+    max_rejections = critic_max_rejections()
+
+    if prior_rejections + 1 >= max_rejections do
+      Logger.warning(
+        "Critic rejection cap reached for issue_id=#{issue_id} issue_identifier=#{Map.get(entry, :identifier)} rejections=#{prior_rejections + 1} cap=#{max_rejections}; falling through to :fail"
+      )
+
+      state
+      |> clear_critic_rejection_attempts(issue_id)
+      |> apply_verification_outcome(issue_id, entry, :fail, outcome)
+    else
+      Logger.info("Critic rejected recipe for issue_id=#{issue_id} issue_identifier=#{Map.get(entry, :identifier)} rejection=#{prior_rejections + 1}/#{max_rejections}; scheduling retry")
+
+      revert_issue_state(issue_id)
+
+      state
+      |> bump_critic_rejection_attempts(issue_id, prior_rejections + 1)
+      |> complete_issue(issue_id)
+      |> schedule_issue_retry(issue_id, 1, %{
+        identifier: Map.get(entry, :identifier),
+        delay_type: :continuation,
+        worker_host: Map.get(entry, :worker_host),
+        workspace_path: Map.get(entry, :workspace_path)
+      })
+    end
   end
 
   defp apply_verification_outcome(%State{} = state, issue_id, entry, :fail, outcome) do
@@ -1058,8 +1095,38 @@ defmodule SymphonyElixir.Orchestrator do
       state
       | claimed: MapSet.delete(state.claimed, issue_id),
         retry_attempts: Map.delete(state.retry_attempts, issue_id),
+        critic_rejection_attempts: Map.delete(state.critic_rejection_attempts, issue_id),
         completed: MapSet.put(state.completed, issue_id)
     }
+  end
+
+  defp bump_critic_rejection_attempts(%State{} = state, issue_id, count) do
+    %{state | critic_rejection_attempts: Map.put(state.critic_rejection_attempts, issue_id, count)}
+  end
+
+  defp clear_critic_rejection_attempts(%State{} = state, issue_id) do
+    %{state | critic_rejection_attempts: Map.delete(state.critic_rejection_attempts, issue_id)}
+  end
+
+  defp critic_max_rejections do
+    Config.settings!().verification.critic_max_rejections
+  end
+
+  defp build_verify_settings(settings, metadata, workspace_path) do
+    base = Map.from_struct(settings)
+
+    if Map.get(settings, :critic_enabled) == true and
+         not Map.has_key?(metadata, :critic_fun_override) do
+      issue_like = %{
+        title: Map.get(metadata, :issue_title),
+        description: Map.get(metadata, :issue_description)
+      }
+
+      critic_context = CriticContext.derive(issue_like, workspace_path)
+      Map.merge(base, critic_context)
+    else
+      base
+    end
   end
 
   defp maybe_cast_failure_to_curator(issue_id, entry, outcome) do

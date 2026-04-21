@@ -1331,16 +1331,22 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert settings.verification.critic_enabled == false
     assert settings.verification.critic_timeout_ms == 180_000
+    assert settings.verification.critic_max_rejections == 2
   end
 
   test "schema parses verification critic fields" do
     assert {:ok, settings} =
              Schema.parse(%{
-               verification: %{critic_enabled: true, critic_timeout_ms: 30_000}
+               verification: %{
+                 critic_enabled: true,
+                 critic_timeout_ms: 30_000,
+                 critic_max_rejections: 5
+               }
              })
 
     assert settings.verification.critic_enabled == true
     assert settings.verification.critic_timeout_ms == 30_000
+    assert settings.verification.critic_max_rejections == 5
   end
 
   test "schema rejects non-positive verification critic_timeout_ms" do
@@ -1348,6 +1354,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              Schema.parse(%{verification: %{critic_timeout_ms: 0}})
 
     assert message =~ "verification.critic_timeout_ms"
+  end
+
+  test "schema rejects negative verification critic_max_rejections" do
+    assert {:error, {:invalid_workflow_config, message}} =
+             Schema.parse(%{verification: %{critic_max_rejections: -1}})
+
+    assert message =~ "verification.critic_max_rejections"
   end
 
   test "schema parses workspace branch_pattern" do
