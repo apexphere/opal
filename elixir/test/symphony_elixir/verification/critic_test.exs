@@ -217,6 +217,29 @@ defmodule SymphonyElixir.Verification.CriticTest do
       end
     end
 
+    test "accepts a Claude response whose closing fence has no trailing newline" do
+      codex_stub = write_rate_limited_stub!()
+
+      # No newline between the JSON payload and the closing ``` — a shape
+      # models routinely emit when the response ends exactly at the fence.
+      claude_stub =
+        write_claude_stub!(~s(```json\n{"verdict":"approve","reason":"fenced tight","missing_coverage":""}```))
+
+      Application.put_env(:symphony_elixir, :verify_critic_codex_command, codex_stub)
+      Application.put_env(:symphony_elixir, :verify_critic_claude_command, claude_stub)
+
+      try do
+        capture_log(fn ->
+          assert {:ok, :approve} = Critic.critique(@task, @diff, @recipe)
+        end)
+      after
+        Application.delete_env(:symphony_elixir, :verify_critic_codex_command)
+        Application.delete_env(:symphony_elixir, :verify_critic_claude_command)
+        File.rm(codex_stub)
+        File.rm(claude_stub)
+      end
+    end
+
     test "surfaces a Claude fallback failure when its stdout has no fenced JSON" do
       codex_stub = write_rate_limited_stub!()
       claude_stub = write_claude_stub!("no fence here\n")

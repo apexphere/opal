@@ -16,10 +16,14 @@ defmodule SymphonyElixir.Critic.FallbackTest do
       assert Fallback.quota_exhausted?(stdout)
     end
 
-    test "is case-insensitive" do
-      assert Fallback.quota_exhausted?("YOU'VE HIT YOUR USAGE LIMIT")
-      assert Fallback.quota_exhausted?("Upgrade to Pro today")
-      assert Fallback.quota_exhausted?("Please purchase more credits")
+    test "is case-insensitive when two phrases match" do
+      assert Fallback.quota_exhausted?("YOU'VE HIT YOUR USAGE LIMIT. Please PURCHASE MORE CREDITS.")
+    end
+
+    test "requires at least two phrase matches (single phrase is not enough)" do
+      refute Fallback.quota_exhausted?("Upgrade to Pro today")
+      refute Fallback.quota_exhausted?("you've hit your usage limit (demo banner)")
+      refute Fallback.quota_exhausted?("Please purchase more credits in the unrelated flow")
     end
 
     test "returns false for unrelated stdout" do

@@ -27,14 +27,23 @@ defmodule SymphonyElixir.Critic.Fallback do
     "purchase more credits"
   ]
 
+  @min_phrase_matches 2
+
   @doc """
   Returns true when `stdout` contains the Codex usage-limit signature.
-  Case-insensitive substring match; any of the known phrases trips it.
+
+  Requires at least #{@min_phrase_matches} of the known phrases to match
+  (case-insensitive substring) — a single match is too broad given that
+  Codex occasionally echoes prompt content into stdout, which could
+  include e.g. recipe text that mentions "Upgrade to Pro" in an unrelated
+  context. The canonical banner carries all three phrases together, so
+  2-of-3 preserves detection while killing single-phrase collisions.
   """
   @spec quota_exhausted?(term()) :: boolean()
   def quota_exhausted?(stdout) when is_binary(stdout) do
     down = String.downcase(stdout)
-    Enum.any?(@rate_limit_phrases, &String.contains?(down, &1))
+    hits = Enum.count(@rate_limit_phrases, &String.contains?(down, &1))
+    hits >= @min_phrase_matches
   end
 
   def quota_exhausted?(_), do: false

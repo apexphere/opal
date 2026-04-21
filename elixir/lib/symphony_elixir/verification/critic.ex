@@ -181,7 +181,7 @@ defmodule SymphonyElixir.Verification.Critic do
   end
 
   defp extract_fenced_json(raw) do
-    case Regex.run(~r/```json\s*\n([\s\S]*?)\n```/, raw, capture: :all_but_first) do
+    case Regex.run(~r/```json\s*\n([\s\S]*?)\s*```/, raw, capture: :all_but_first) do
       [json] -> {:ok, json}
       _ -> {:error, {:claude_output_missing_fence, raw}}
     end
