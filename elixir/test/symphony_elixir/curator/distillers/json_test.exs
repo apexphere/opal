@@ -36,6 +36,67 @@ defmodule SymphonyElixir.Curator.Distillers.JsonTest do
       assert {:create, "react-hooks", entry} = proposal.decision
       assert entry.title == "React Hooks"
       assert entry.body =~ "heading"
+      assert entry.perfect_for == []
+      assert entry.not_ideal_for == []
+    end
+
+    test "propagates perfect_for / not_ideal_for on :create" do
+      raw = """
+      ```json
+      {
+        "decision": "create",
+        "slug": "x",
+        "title": "T",
+        "topic": "t",
+        "body": "b",
+        "perfect_for": ["case a", "  case b  ", ""],
+        "not_ideal_for": ["anti a"]
+      }
+      ```
+      """
+
+      assert {:ok, proposal} = Json.parse_output(raw)
+      assert {:create, "x", entry} = proposal.decision
+      assert entry.perfect_for == ["case a", "case b"]
+      assert entry.not_ideal_for == ["anti a"]
+    end
+
+    test "coerces non-string items in perfect_for on :create" do
+      raw = """
+      ```json
+      {
+        "decision": "create",
+        "slug": "x",
+        "title": "T",
+        "topic": "t",
+        "body": "b",
+        "perfect_for": [123, true, "ok"]
+      }
+      ```
+      """
+
+      assert {:ok, proposal} = Json.parse_output(raw)
+      assert {:create, "x", entry} = proposal.decision
+      assert entry.perfect_for == ["123", "true", "ok"]
+    end
+
+    test "tolerates non-list perfect_for on :create" do
+      raw = """
+      ```json
+      {
+        "decision": "create",
+        "slug": "x",
+        "title": "T",
+        "topic": "t",
+        "body": "b",
+        "perfect_for": "not a list"
+      }
+      ```
+      """
+
+      assert {:ok, proposal} = Json.parse_output(raw)
+      assert {:create, "x", entry} = proposal.decision
+      assert entry.perfect_for == []
     end
 
     test "parses a :refine response" do
