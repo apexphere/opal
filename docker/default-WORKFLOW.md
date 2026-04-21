@@ -3,6 +3,11 @@ tracker:
   kind: github
   repo: $GITHUB_REPO
   api_key: $GITHUB_TOKEN
+  # GitHub labels backing the default state machine:
+  #   Todo -> `todo`
+  #   In Progress -> `in-progress`
+  #   Human Review -> `human-review`
+  # Closed issues are treated as Done / Closed.
   active_states: ["Todo", "In Progress"]
   terminal_states: ["Done", "Closed"]
 agent:
@@ -11,6 +16,9 @@ agent:
   max_turns: 20
 workspace:
   root: /workspace
+hooks:
+  after_create: |
+    git clone /project .
 polling:
   interval_ms: 30000
 claude_code:
@@ -23,5 +31,3 @@ server:
   host: "0.0.0.0"
   port: 4000
 ---
-
-(Empty body — Opal will use its built-in generic project-adaptive prompt.)

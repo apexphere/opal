@@ -1,24 +1,35 @@
-# Symphony Elixir
+# Opal Elixir
 
-This directory contains the current Elixir/OTP implementation of Symphony, based on
-[`SPEC.md`](../SPEC.md) at the repository root.
+This directory contains Opal's Elixir/OTP implementation. It began as the Symphony reference
+implementation described by [`SPEC.md`](../SPEC.md), and now carries Opal's default path:
+GitHub Issues as the tracker, Claude Code (`claude -p`) as the runtime, Docker workspaces, and
+project-scoped knowledge.
 
 > [!WARNING]
-> Symphony Elixir is prototype software intended for evaluation only and is presented as-is.
-> We recommend implementing your own hardened version based on `SPEC.md`.
+> Opal is prototype software intended for evaluation only and is presented as-is. The supported
+> first-run path is the Docker image documented in [`../docker/README.md`](../docker/README.md).
 
 ## Screenshot
 
-![Symphony Elixir screenshot](../.github/media/elixir-screenshot.png)
+![Opal Elixir screenshot](../.github/media/elixir-screenshot.png)
 
 ## How it works
 
-1. Polls Linear for candidate work
+Default Opal flow:
+
+1. Polls GitHub Issues for candidate work
 2. Creates a workspace per issue
-3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
-   workspace
-4. Sends a workflow prompt to Codex
-5. Keeps Codex working on the issue until the work is done
+3. Creates or checks out an issue branch
+4. Launches Claude Code (`claude -p`) inside the workspace
+5. Sends a project-adaptive workflow prompt
+6. Runs self-verification when enabled
+7. Keeps working or hands off a PR according to the issue state
+
+Compatibility paths still exist:
+
+- Linear can be used as a tracker via `tracker.kind: linear`.
+- Codex can be used as a runtime via `agent.runtime: codex` and
+  [App Server mode](https://developers.openai.com/codex/app-server/).
 
 During app-server sessions, Symphony also serves a client-side `linear_graphql` tool so that repo
 skills can make raw Linear GraphQL calls.
@@ -26,7 +37,24 @@ skills can make raw Linear GraphQL calls.
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.
 
-## How to use it
+## How to use the default Opal path
+
+Use Docker unless you are developing the Elixir implementation itself:
+
+```bash
+docker build -t opal ..
+docker run --rm -it \
+  -p 4000:4000 \
+  -v "$PWD/..":/project \
+  -v /tmp/opal-workspaces:/workspace \
+  -e GITHUB_TOKEN=ghp_... \
+  -e GITHUB_REPO=owner/repo \
+  opal
+```
+
+See [`../docker/README.md`](../docker/README.md) for the full Docker setup.
+
+## How to use the legacy Linear/Codex workflow
 
 1. Make sure your codebase is set up to work well with agents: see
    [Harness engineering](https://openai.com/index/harness-engineering/).
