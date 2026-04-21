@@ -216,6 +216,47 @@ defmodule SymphonyElixir.ClaudeCode.RunnerTest do
     end
   end
 
+  test "rejects prompt exceeding max_prompt_bytes with prompt_too_large error" do
+    test_root =
+      Path.join(System.tmp_dir!(), "symp-claude-prompt-too-large-#{System.unique_integer([:positive])}")
+
+    try do
+      {workspace, _bin} = setup_workspace(test_root, "#!/bin/sh\nexit 0", claude_code_max_prompt_bytes: 100)
+
+      large_prompt = String.duplicate("a", 101)
+
+      assert {:error, {:prompt_too_large, actual, 100}} =
+               Runner.run_turn(workspace, large_prompt, default_issue())
+
+      assert actual == 101
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "accepts prompt at the max_prompt_bytes boundary" do
+    test_root =
+      Path.join(System.tmp_dir!(), "symp-claude-prompt-ok-#{System.unique_integer([:positive])}")
+
+    try do
+      script = """
+      #!/bin/sh
+      printf '%s\\n' '{"type":"system","subtype":"init","session_id":"sess-ok"}'
+      printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-ok","usage":{"input_tokens":1,"output_tokens":1}}'
+      exit 0
+      """
+
+      {workspace, _bin} = setup_workspace(test_root, script, claude_code_max_prompt_bytes: 100)
+
+      exact_prompt = String.duplicate("a", 100)
+
+      assert {:ok, %{result: :turn_completed}} =
+               Runner.run_turn(workspace, exact_prompt, default_issue())
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "rejects workspace root and outside-root paths" do
     test_root =
       Path.join(System.tmp_dir!(), "symp-claude-cwd-guard-#{System.unique_integer([:positive])}")

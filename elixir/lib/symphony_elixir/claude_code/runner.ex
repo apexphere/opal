@@ -36,6 +36,7 @@ defmodule SymphonyElixir.ClaudeCode.Runner do
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace),
+         :ok <- validate_prompt_size(prompt),
          {:ok, port} <- start_port(expanded_workspace, prompt) do
       metadata = port_metadata(port)
 
@@ -49,6 +50,17 @@ defmodule SymphonyElixir.ClaudeCode.Runner do
           emit(on_message, :turn_ended_with_error, %{reason: reason}, metadata)
           {:error, reason}
       end
+    end
+  end
+
+  defp validate_prompt_size(prompt) do
+    max_bytes = Config.settings!().claude_code.max_prompt_bytes
+    actual_bytes = byte_size(prompt)
+
+    if actual_bytes > max_bytes do
+      {:error, {:prompt_too_large, actual_bytes, max_bytes}}
+    else
+      :ok
     end
   end
 

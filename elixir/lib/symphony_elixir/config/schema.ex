@@ -216,6 +216,7 @@ defmodule SymphonyElixir.Config.Schema do
       field(:permission_mode, :string, default: "acceptEdits")
       field(:extra_flags, {:array, :string}, default: [])
       field(:turn_timeout_ms, :integer, default: 3_600_000)
+      field(:max_prompt_bytes, :integer, default: 100_000)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -223,11 +224,12 @@ defmodule SymphonyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:command, :model, :allowed_tools, :permission_mode, :extra_flags, :turn_timeout_ms],
+        [:command, :model, :allowed_tools, :permission_mode, :extra_flags, :turn_timeout_ms, :max_prompt_bytes],
         empty_values: []
       )
       |> validate_required([:command])
       |> validate_number(:turn_timeout_ms, greater_than: 0)
+      |> validate_number(:max_prompt_bytes, greater_than: 0)
     end
   end
 
