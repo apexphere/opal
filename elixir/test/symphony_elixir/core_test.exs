@@ -834,7 +834,27 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Add a thing"
     assert prompt =~ "state=In Progress"
     assert prompt =~ "url=https://example.org/issues/MT-42"
-    assert prompt =~ "labels=backendpriority"
+    assert prompt =~ "labels=backend, priority"
+  end
+
+  test "prompt builder joins Issue.labels list with comma-space separator" do
+    workflow_prompt = "labels={{ issue.labels }}"
+
+    write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
+
+    issue = %Issue{
+      identifier: "S-2",
+      title: "t",
+      description: "d",
+      state: "Todo",
+      url: "https://example.org/issues/S-2",
+      labels: ["bug", "todo", "priority-high"]
+    }
+
+    prompt = PromptBuilder.build_prompt(issue)
+
+    assert prompt =~ "labels=bug, todo, priority-high"
+    refute prompt =~ "labels=bugtodopriority-high"
   end
 
   test "prompt builder still resolves legacy issue.X variables for backwards compat" do
