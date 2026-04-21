@@ -21,6 +21,10 @@ hooks:
     git clone /project .
 polling:
   interval_ms: 30000
+verification:
+  enabled: true
+  required: true
+  step_timeout_ms: 600000
 claude_code:
   command: claude
   permission_mode: acceptEdits

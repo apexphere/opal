@@ -1311,6 +1311,17 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert settings.verification.step_timeout_ms == 30_000
   end
 
+  test "Docker default workflow requires verification" do
+    path = Path.expand("../../../docker/default-WORKFLOW.md", __DIR__)
+
+    assert {:ok, %{config: config}} = Workflow.load(path)
+    assert {:ok, settings} = Schema.parse(config)
+
+    assert settings.verification.enabled == true
+    assert settings.verification.required == true
+    assert settings.verification.step_timeout_ms == 600_000
+  end
+
   test "schema defaults verification to disabled with 10-minute timeout" do
     assert {:ok, settings} = Schema.parse(%{})
 

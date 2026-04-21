@@ -1034,6 +1034,7 @@ defmodule SymphonyElixir.Orchestrator do
     |> schedule_issue_retry(issue_id, 1, %{
       identifier: Map.get(entry, :identifier),
       delay_type: :continuation,
+      error: verification_retry_error(outcome),
       worker_host: Map.get(entry, :worker_host),
       workspace_path: Map.get(entry, :workspace_path)
     })
@@ -1052,6 +1053,28 @@ defmodule SymphonyElixir.Orchestrator do
         completed: MapSet.put(state.completed, issue_id)
     }
   end
+
+  defp verification_retry_error(%{skipped_reason: reason}) when not is_nil(reason) do
+    "verification failed: #{format_verification_reason(reason)}"
+  end
+
+  defp verification_retry_error(%{steps: steps}) when is_list(steps) do
+    case Enum.find(steps, &(Map.get(&1, :passed) == false)) do
+      %{name: name, exit: exit, expect_exit: expect_exit} ->
+        "verification failed: #{name} exited #{format_verification_exit(exit)} (expected #{expect_exit})"
+
+      _ ->
+        "verification failed"
+    end
+  end
+
+  defp verification_retry_error(_outcome), do: "verification failed"
+
+  defp format_verification_exit(:timeout), do: "timeout"
+  defp format_verification_exit(exit), do: to_string(exit)
+
+  defp format_verification_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp format_verification_reason(reason), do: inspect(reason)
 
   defp maybe_cast_failure_to_curator(issue_id, entry, outcome) do
     cond do
