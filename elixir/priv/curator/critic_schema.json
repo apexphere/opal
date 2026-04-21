@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "reason", "conflict_slug"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["approve", "reject", "conflict"]},
+    "reason": {"type": "string"},
+    "conflict_slug": {"type": ["string", "null"]}
+  }
+}
