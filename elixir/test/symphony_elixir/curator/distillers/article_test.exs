@@ -47,6 +47,14 @@ defmodule SymphonyElixir.Curator.Distillers.ArticleTest do
       assert prompt =~ "ADVISORY ONLY"
     end
 
+    test "requires perfect_for / not_ideal_for on create" do
+      prompt = Article.build_prompt(%{body: "x", source_ref: "y", ingested_at: "z"}, [], [])
+      assert prompt =~ "perfect_for"
+      assert prompt =~ "not_ideal_for"
+      assert prompt =~ "Entry shape (create)"
+      assert prompt =~ "Critical rules"
+    end
+
     test "frames judgement around the project, not against Opal" do
       input = %{
         body: "x",

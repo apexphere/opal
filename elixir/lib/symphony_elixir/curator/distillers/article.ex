@@ -77,18 +77,50 @@ defmodule SymphonyElixir.Curator.Distillers.Article do
     #{input.body}
     </untrusted_input>
 
+    ## Entry shape (create)
+
+    A wiki entry is a "skill" a future reader can apply. Design each entry as
+    a reusable skill, not a summary of the source article. When `decision` is
+    `create`, the entry must include:
+
+    * `perfect_for` — 2 to 5 short bullet phrases naming situations where the
+      entry clearly applies. These are retrieval triggers; a later reader
+      decides whether to load the entry by reading these.
+    * `not_ideal_for` — 2 to 5 short bullet phrases naming situations where
+      the entry should NOT be applied. Forces the boundary to be explicit.
+      Do not leave empty.
+    * `body` — structured markdown. Prefer these sections in order, omitting
+      any that do not apply:
+        - `## Overview` — 2 to 4 sentences on what this skill is and when it
+          helps.
+        - `## Core principle` — one idea that organises the skill.
+        - `## Workflow` or `## How to apply` — concrete steps or rules the
+          reader follows.
+        - `## Critical rules` — hard invariants marked with a ⚠️ prefix. Keep
+          only rules a reader must not violate; move softer guidance into
+          the workflow section.
+        - `## Notes` — caveats, base-rate info, or prerequisites.
+      Do not simply paste or paraphrase the source. Extract the operating
+      skill. Cross-link related entries with `[[other-slug]]` where useful.
+
+    On `refine`, you may include `perfect_for` / `not_ideal_for` in the
+    response but they are currently advisory — the refine path preserves the
+    existing entry's applicability lists.
+
     Respond with EXACTLY one fenced JSON block, no commentary outside it:
 
     ```json
     {
       "decision": "reject" | "create" | "refine",
       "rationale": "one or two sentences",
-      "slug": "kebab-case-slug",         // present on create
-      "title": "Title",                  // present on create
-      "topic": "topic/sub",              // present on create
-      "body": "markdown body",           // present on create
-      "target_slug": "existing-slug",    // present on refine (ADVISORY ONLY)
-      "merged_body": "new full body"     // present on refine
+      "slug": "kebab-case-slug",                // present on create
+      "title": "Title",                         // present on create
+      "topic": "topic/sub",                     // present on create
+      "perfect_for": ["...", "..."],            // present on create, 2-5 items
+      "not_ideal_for": ["...", "..."],          // present on create, 2-5 items
+      "body": "markdown body",                  // present on create
+      "target_slug": "existing-slug",           // present on refine (ADVISORY ONLY)
+      "merged_body": "new full body"            // present on refine
     }
     ```
     """
