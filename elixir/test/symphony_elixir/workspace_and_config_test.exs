@@ -1325,4 +1325,180 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert message =~ "verification.step_timeout_ms"
   end
+
+  test "schema parses workspace branch_pattern" do
+    assert {:ok, settings} = Schema.parse(%{workspace: %{branch_pattern: "feat/{number}"}})
+    assert settings.workspace.branch_pattern == "feat/{number}"
+  end
+
+  test "schema defaults workspace branch_pattern to opal/{number}" do
+    assert {:ok, settings} = Schema.parse(%{})
+    assert settings.workspace.branch_pattern == "opal/{number}"
+  end
+
+  test "fresh git workspace is automatically put on an opal branch" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-git-branch-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "repo\n")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "git clone --depth 1 #{template_repo} ."
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue("S-29")
+
+      {branch, 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
+      assert String.trim(branch) == "opal/S-29"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "pre-push hook is installed in fresh git workspace" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-prepush-hook-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "repo\n")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "git clone --depth 1 #{template_repo} ."
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue("S-42")
+
+      hook_path = Path.join([workspace, ".git", "hooks", "pre-push"])
+      assert File.exists?(hook_path)
+      assert File.stat!(hook_path).mode |> Bitwise.band(0o111) != 0
+
+      hook_content = File.read!(hook_path)
+      assert hook_content =~ "refs/heads/main"
+      assert hook_content =~ "refs/heads/master"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "custom branch_pattern is applied when branching" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-custom-pattern-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "repo\n")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        workspace_branch_pattern: "feature/{number}",
+        hook_after_create: "git clone --depth 1 #{template_repo} ."
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue("PROJ-99")
+
+      {branch, 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
+      assert String.trim(branch) == "feature/PROJ-99"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "non-git workspace skips branch setup without error" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-nongit-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(), workspace_root: workspace_root)
+
+      assert {:ok, workspace} = Workspace.create_for_issue("NO-GIT-1")
+      refute File.exists?(Path.join(workspace, ".git"))
+    after
+      File.rm_rf(workspace_root)
+    end
+  end
+
+  test "existing workspace is not re-branched on reuse" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-reuse-branch-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "repo\n")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "git clone --depth 1 #{template_repo} ."
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue("S-77")
+      {branch1, 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
+      assert String.trim(branch1) == "opal/S-77"
+
+      System.cmd("git", ["-C", workspace, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", workspace, "config", "user.email", "test@example.com"])
+      File.write!(Path.join(workspace, "change.txt"), "change\n")
+      System.cmd("git", ["-C", workspace, "add", "change.txt"])
+      System.cmd("git", ["-C", workspace, "commit", "-m", "a commit on the branch"])
+
+      assert {:ok, ^workspace} = Workspace.create_for_issue("S-77")
+
+      {branch2, 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
+      assert String.trim(branch2) == "opal/S-77"
+      assert File.exists?(Path.join(workspace, "change.txt"))
+    after
+      File.rm_rf(test_root)
+    end
+  end
 end

@@ -29,6 +29,17 @@ defmodule SymphonyElixir.Config do
   Treat the project's own instructions as authoritative. They override any
   generic guidance below when they conflict.
 
+  ## CRITICAL: branch before you touch any code
+
+  The workspace has already been checked out on a branch named after this task.
+  Verify with `git branch --show-current` before doing anything else. If the
+  output is `main` or `master`, stop and run `git checkout -b opal/{{ task.number }}`
+  before making any changes. **Never commit to or push to `main`/`master` directly.**
+  A pre-push hook will reject any such push.
+
+  Once on a branch, the workflow is: implement → test → commit → push branch →
+  open pull request. The PR must link back to this task.
+
   ## Execution rules
 
   1. Understand the project first — read its docs, scan its structure, learn
@@ -36,8 +47,8 @@ defmodule SymphonyElixir.Config do
   2. Work autonomously. Do not ask for human input unless you are truly
      blocked.
   3. Follow the project's own testing, formatting, and code style conventions.
-  4. Create a branch, implement the change, run the project's tests, commit,
-     push, and open a pull request that links back to this task.
+  4. Implement the change on your branch, run the project's tests, commit,
+     push the branch, and open a pull request that links back to this task.
 
   {% if attempt %}
   This is retry attempt #{{ attempt }}. Resume from the current workspace

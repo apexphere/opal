@@ -9,6 +9,21 @@ defmodule SymphonyElixir.Workspace do
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
 
+  @pre_push_hook_script ~S"""
+  #!/bin/sh
+  # Opal: reject direct pushes to main/master — work on a branch and open a pull request.
+  while IFS=' ' read -r _local_ref _local_sha remote_ref _remote_sha; do
+    case "$remote_ref" in
+      refs/heads/main|refs/heads/master)
+        printf 'error: Opal: direct push to %s is not allowed.\n' "$remote_ref" >&2
+        printf 'error: Create a branch and open a pull request instead.\n' >&2
+        exit 1
+        ;;
+    esac
+  done
+  exit 0
+  """
+
   @type worker_host :: String.t() | nil
 
   @spec create_for_issue(map() | String.t() | nil, worker_host()) ::
@@ -23,6 +38,7 @@ defmodule SymphonyElixir.Workspace do
            :ok <- validate_workspace_path(workspace, worker_host),
            {:ok, workspace, created?} <- ensure_workspace(workspace, worker_host),
            :ok <- maybe_run_after_create_hook(workspace, issue_context, created?, worker_host),
+           :ok <- maybe_setup_git_branch(workspace, issue_context, created?, worker_host),
            :ok <- maybe_inject_knowledge(workspace, issue_context, worker_host) do
         {:ok, workspace}
       end
@@ -247,6 +263,84 @@ defmodule SymphonyElixir.Workspace do
 
       false ->
         :ok
+    end
+  end
+
+  defp maybe_setup_git_branch(workspace, issue_context, true, nil) do
+    git_dir = Path.join(workspace, ".git")
+
+    if File.dir?(git_dir) do
+      branch = resolve_branch_name(issue_context)
+
+      with :ok <- create_git_branch_local(workspace, branch) do
+        install_pre_push_hook_local(git_dir)
+      end
+    else
+      :ok
+    end
+  end
+
+  defp maybe_setup_git_branch(workspace, issue_context, true, worker_host) when is_binary(worker_host) do
+    branch = resolve_branch_name(issue_context)
+    hook_content = String.trim_trailing(@pre_push_hook_script)
+
+    script = """
+    set -eu
+    workspace=#{shell_escape(workspace)}
+    if [ -d "$workspace/.git" ]; then
+      cd "$workspace"
+      git checkout -b #{shell_escape(branch)} 2>/dev/null || git checkout #{shell_escape(branch)}
+      mkdir -p "$workspace/.git/hooks"
+      cat > "$workspace/.git/hooks/pre-push" <<'OPAL_HOOK_EOF'
+    #{hook_content}
+    OPAL_HOOK_EOF
+      chmod +x "$workspace/.git/hooks/pre-push"
+    fi
+    """
+
+    case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
+      {:ok, {_output, 0}} -> :ok
+      {:ok, {output, status}} -> {:error, {:git_branch_setup_failed, worker_host, status, output}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp maybe_setup_git_branch(_workspace, _issue_context, _created?, _worker_host), do: :ok
+
+  defp resolve_branch_name(%{issue_identifier: identifier}) do
+    pattern = Config.settings!().workspace.branch_pattern
+    sanitized = git_safe_ref(identifier || "issue")
+    String.replace(pattern, "{number}", sanitized)
+  end
+
+  defp git_safe_ref(value) do
+    value
+    |> String.replace(~r/[^a-zA-Z0-9._\-\/]/, "-")
+    |> String.trim("-")
+    |> then(fn s -> if s == "", do: "issue", else: s end)
+  end
+
+  defp create_git_branch_local(workspace, branch) do
+    case System.cmd("git", ["checkout", "-b", branch], cd: workspace, stderr_to_stdout: true) do
+      {_output, 0} ->
+        :ok
+
+      {_output, _} ->
+        case System.cmd("git", ["checkout", branch], cd: workspace, stderr_to_stdout: true) do
+          {_output, 0} -> :ok
+          {output, status} -> {:error, {:git_branch_setup_failed, :local, status, output}}
+        end
+    end
+  end
+
+  defp install_pre_push_hook_local(git_dir) do
+    hooks_dir = Path.join(git_dir, "hooks")
+    hook_path = Path.join(hooks_dir, "pre-push")
+    hook_content = String.trim_trailing(@pre_push_hook_script)
+
+    with :ok <- File.mkdir_p(hooks_dir),
+         :ok <- File.write(hook_path, hook_content <> "\n") do
+      File.chmod(hook_path, 0o755)
     end
   end
 

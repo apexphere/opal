@@ -103,6 +103,7 @@ defmodule SymphonyElixir.TestSupport do
           tracker_labels_prefix: nil,
           poll_interval_ms: 30_000,
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
+          workspace_branch_pattern: nil,
           worker_ssh_hosts: [],
           worker_max_concurrent_agents_per_host: nil,
           agent_runtime: "codex",
@@ -155,6 +156,7 @@ defmodule SymphonyElixir.TestSupport do
     tracker_labels_prefix = Keyword.get(config, :tracker_labels_prefix)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
+    workspace_branch_pattern = Keyword.get(config, :workspace_branch_pattern)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
     worker_max_concurrent_agents_per_host = Keyword.get(config, :worker_max_concurrent_agents_per_host)
     agent_runtime = Keyword.get(config, :agent_runtime)
@@ -210,6 +212,7 @@ defmodule SymphonyElixir.TestSupport do
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
         "workspace:",
         "  root: #{yaml_value(workspace_root)}",
+        workspace_branch_pattern && "  branch_pattern: #{yaml_value(workspace_branch_pattern)}",
         worker_yaml(worker_ssh_hosts, worker_max_concurrent_agents_per_host),
         "agent:",
         "  runtime: #{yaml_value(agent_runtime)}",
