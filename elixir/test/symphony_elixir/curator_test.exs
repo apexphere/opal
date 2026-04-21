@@ -545,4 +545,49 @@ defmodule SymphonyElixir.CuratorTest do
                Curator.learn(ctx.article_path, project_key: ctx.project_key)
     end
   end
+
+  describe "resolve_critic/1" do
+    test ":claude resolves to Consistency" do
+      assert Curator.resolve_critic(:claude) == Critics.Consistency
+    end
+
+    test ":codex resolves to Codex" do
+      assert Curator.resolve_critic(:codex) == Critics.Codex
+    end
+
+    test "a module reference passes through" do
+      assert Curator.resolve_critic(Critics.Stub) == Critics.Stub
+    end
+
+    test "unknown module reference raises with a helpful message" do
+      assert_raise ArgumentError, ~r/unknown critic runtime/, fn ->
+        Curator.resolve_critic(:DefinitelyNotAModule)
+      end
+    end
+  end
+
+  describe "default_critic dispatcher" do
+    test "treats a configured :codex atom as Critics.Codex", ctx do
+      Application.put_env(:symphony_elixir, :curator_critic_module, :codex)
+
+      # Ask for a verdict via Codex, but with a bogus binary so the call
+      # fails fast — we only care that dispatch picked Codex rather than
+      # Consistency.
+      Application.put_env(
+        :symphony_elixir,
+        :curator_codex_command,
+        "definitely-not-a-real-cmd-xyzzy"
+      )
+
+      Application.put_env(:symphony_elixir, :curator_stub_response, {:reject, "x"})
+
+      try do
+        assert {:error, {:codex_command_not_found, _}} =
+                 Curator.learn(ctx.article_path, project_key: ctx.project_key)
+      after
+        Application.put_env(:symphony_elixir, :curator_critic_module, Critics.Stub)
+        Application.delete_env(:symphony_elixir, :curator_codex_command)
+      end
+    end
+  end
 end

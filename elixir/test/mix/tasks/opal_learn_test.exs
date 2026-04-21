@@ -227,6 +227,86 @@ defmodule Mix.Tasks.Opal.LearnTest do
     end
   end
 
+  test "--critic-runtime codex threads Critics.Codex into the curator options", ctx do
+    Application.put_env(
+      :symphony_elixir,
+      :curator_stub_response,
+      {:reject, "noop"}
+    )
+
+    # Point the codex binary at something that doesn't exist — proves
+    # dispatch picked Critics.Codex (rather than the Stub critic the
+    # setup block wired up) because we get a codex_command_not_found
+    # error out of the pipeline.
+    Application.put_env(
+      :symphony_elixir,
+      :curator_codex_command,
+      "definitely-not-a-real-cmd-xyzzy"
+    )
+
+    try do
+      output =
+        capture_io(:stderr, fn ->
+          Learn.run([
+            ctx.article_path,
+            "--project",
+            "github_apexphere_opal-learn-task",
+            "--critic-runtime",
+            "codex",
+            "--auto-accept"
+          ])
+        end)
+
+      assert output =~ "codex_command_not_found"
+    after
+      Application.delete_env(:symphony_elixir, :curator_codex_command)
+    end
+  end
+
+  test "--critic-runtime claude keeps the Consistency critic", ctx do
+    Application.put_env(
+      :symphony_elixir,
+      :curator_stub_response,
+      {:reject, "noop"}
+    )
+
+    Application.put_env(
+      :symphony_elixir,
+      :curator_claude_command,
+      "definitely-not-a-real-cmd-xyzzy"
+    )
+
+    try do
+      output =
+        capture_io(:stderr, fn ->
+          Learn.run([
+            ctx.article_path,
+            "--project",
+            "github_apexphere_opal-learn-task",
+            "--critic-runtime",
+            "claude",
+            "--auto-accept"
+          ])
+        end)
+
+      assert output =~ "claude_command_not_found"
+    after
+      Application.delete_env(:symphony_elixir, :curator_claude_command)
+    end
+  end
+
+  test "--critic-runtime rejects unknown values", ctx do
+    assert_raise Mix.Error, ~r/Invalid --critic-runtime/, fn ->
+      Learn.run([
+        ctx.article_path,
+        "--project",
+        "github_apexphere_opal-learn-task",
+        "--critic-runtime",
+        "bogus"
+      ])
+    end
+  end
+
   test "formats a REFINE decision", ctx do
     # Seed the refine target so curator's sanitize_proposal accepts it.
     :ok =

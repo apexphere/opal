@@ -22,6 +22,10 @@ defmodule Mix.Tasks.Opal.Learn do
     --source-ref           Source ref recorded on the entry (defaults to the article path)
     --auto-accept          Skip the review prompt and write immediately on create/refine
                            (intended for fixture evaluation, NOT for production use)
+    --critic-runtime       Which critic backend to use: `claude` (default) or `codex`.
+                           Overrides the `:curator_critic_module` config for this
+                           invocation only. Use `codex` to get a second-opinion critic
+                           backed by a different model provider than the producer.
   """
 
   alias SymphonyElixir.Curator
@@ -37,7 +41,8 @@ defmodule Mix.Tasks.Opal.Learn do
           project_description: :string,
           source_ref: :string,
           help: :boolean,
-          auto_accept: :boolean
+          auto_accept: :boolean,
+          critic_runtime: :string
         ],
         aliases: [p: :project, h: :help]
       )
@@ -66,6 +71,7 @@ defmodule Mix.Tasks.Opal.Learn do
     learn_opts =
       [project_key: project_key, source_ref: source_ref]
       |> maybe_put(:project_description, project_description)
+      |> maybe_put(:critic, resolve_critic_flag(opts[:critic_runtime]))
 
     case Curator.learn(article_path, learn_opts) do
       {:ok, proposal} ->
@@ -92,6 +98,14 @@ defmodule Mix.Tasks.Opal.Learn do
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp resolve_critic_flag(nil), do: nil
+  defp resolve_critic_flag("claude"), do: Curator.resolve_critic(:claude)
+  defp resolve_critic_flag("codex"), do: Curator.resolve_critic(:codex)
+
+  defp resolve_critic_flag(other) do
+    Mix.raise("Invalid --critic-runtime value #{inspect(other)}; expected claude|codex")
+  end
 
   defp auto_apply(proposal, project_key) do
     case proposal.decision do

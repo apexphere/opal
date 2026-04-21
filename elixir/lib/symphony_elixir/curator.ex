@@ -299,11 +299,34 @@ defmodule SymphonyElixir.Curator do
   end
 
   defp default_critic do
-    Application.get_env(
-      :symphony_elixir,
-      :curator_critic_module,
-      SymphonyElixir.Curator.Critics.Consistency
-    )
+    configured =
+      Application.get_env(
+        :symphony_elixir,
+        :curator_critic_module,
+        SymphonyElixir.Curator.Critics.Consistency
+      )
+
+    resolve_critic(configured)
+  end
+
+  @doc """
+  Resolves a critic runtime reference into a concrete module.
+
+  Accepts either a module (e.g. a stub for tests) or one of the
+  convenience atoms `:claude` / `:codex`. Unknown atoms raise with a
+  helpful message rather than silently falling back.
+  """
+  @spec resolve_critic(module() | atom()) :: module()
+  def resolve_critic(:claude), do: SymphonyElixir.Curator.Critics.Consistency
+  def resolve_critic(:codex), do: SymphonyElixir.Curator.Critics.Codex
+
+  def resolve_critic(module) when is_atom(module) do
+    if Code.ensure_loaded?(module) do
+      module
+    else
+      raise ArgumentError,
+            "unknown critic runtime #{inspect(module)}; expected :claude, :codex, or a module"
+    end
   end
 
   defp iso8601_now, do: DateTime.utc_now() |> DateTime.to_iso8601()
