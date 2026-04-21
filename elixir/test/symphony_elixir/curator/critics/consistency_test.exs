@@ -46,6 +46,33 @@ defmodule SymphonyElixir.Curator.Critics.ConsistencyTest do
       assert prompt =~ "```json"
       assert prompt =~ "\"verdict\""
     end
+
+    test "frames judgement around the project, not against Opal" do
+      ctx = %{
+        project_key: "trading_indicators",
+        project_description: "Stock and crypto technical analysis"
+      }
+
+      prompt = Consistency.build_prompt("x", [], [], ctx)
+
+      assert prompt =~ "project `trading_indicators` (Stock and crypto technical analysis)"
+      refute prompt =~ "Opal"
+    end
+
+    test "falls back to project_key alone when description is blank" do
+      ctx = %{project_key: "some_project", project_description: ""}
+      prompt = Consistency.build_prompt("x", [], [], ctx)
+
+      assert prompt =~ "project `some_project`"
+      refute prompt =~ "project `some_project` ("
+    end
+
+    test "uses 'this project' placeholder when project_key is missing" do
+      # Defensive: mirror the distiller helper so context-less callers still
+      # produce a valid prompt.
+      prompt = Consistency.build_prompt("x", [], [], %{})
+      assert prompt =~ "this project"
+    end
   end
 
   describe "parse_output/2" do

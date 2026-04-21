@@ -46,6 +46,43 @@ defmodule SymphonyElixir.Curator.Distillers.ArticleTest do
       assert prompt =~ "\"decision\""
       assert prompt =~ "ADVISORY ONLY"
     end
+
+    test "frames judgement around the project, not against Opal" do
+      input = %{
+        body: "x",
+        source_ref: "y",
+        ingested_at: "z",
+        project_key: "trading_indicators",
+        project_description: "Stock and crypto technical analysis"
+      }
+
+      prompt = Article.build_prompt(input, [], [])
+
+      assert prompt =~ "project `trading_indicators` (Stock and crypto technical analysis)"
+      refute prompt =~ "Opal"
+    end
+
+    test "falls back to project_key alone when description is blank" do
+      input = %{
+        body: "x",
+        source_ref: "y",
+        ingested_at: "z",
+        project_key: "some_project",
+        project_description: ""
+      }
+
+      prompt = Article.build_prompt(input, [], [])
+
+      assert prompt =~ "project `some_project`"
+      refute prompt =~ "project `some_project` ("
+    end
+
+    test "uses 'this project' placeholder when project_key is missing" do
+      # Defensive: the curator always supplies :project_key, but the helper
+      # tolerates its absence so lower-level prompt tests stay simple.
+      prompt = Article.build_prompt(%{body: "x", source_ref: "y", ingested_at: "z"}, [], [])
+      assert prompt =~ "project `this project`" or prompt =~ "this project"
+    end
   end
 
   describe "parse_output/1" do

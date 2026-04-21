@@ -67,6 +67,41 @@ defmodule SymphonyElixir.Curator.Distillers.VerifyLogTest do
       assert prompt =~ "```json"
       assert prompt =~ "\"decision\""
     end
+
+    test "frames judgement around the project, not against Opal" do
+      input = %{
+        body: "mix test\n---OUTPUT---\nboom",
+        source_ref: "y",
+        ingested_at: "z",
+        project_key: "trading_indicators",
+        project_description: "Stock and crypto technical analysis"
+      }
+
+      prompt = VerifyLog.build_prompt(input, [], [])
+
+      assert prompt =~ "project `trading_indicators` (Stock and crypto technical analysis)"
+      refute prompt =~ "Opal"
+    end
+
+    test "falls back to project_key alone when description is blank" do
+      input = %{
+        body: "x",
+        source_ref: "y",
+        ingested_at: "z",
+        project_key: "some_project",
+        project_description: ""
+      }
+
+      prompt = VerifyLog.build_prompt(input, [], [])
+
+      assert prompt =~ "project `some_project`"
+      refute prompt =~ "project `some_project` ("
+    end
+
+    test "uses 'this project' placeholder when project_key is missing" do
+      prompt = VerifyLog.build_prompt(%{body: "x", source_ref: "y", ingested_at: "z"}, [], [])
+      assert prompt =~ "this project"
+    end
   end
 
   describe "distill/3" do
