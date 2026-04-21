@@ -26,9 +26,15 @@ defmodule SymphonyElixir.Curator.Critic do
           | {:reject, String.t()}
           | {:conflict, slug :: String.t(), reason :: String.t()}
 
+  @type context :: %{
+          required(:project_key) => String.t(),
+          required(:project_description) => String.t() | nil
+        }
+
   @callback critique(
               article_body :: String.t(),
               summaries :: [Entry.summary()],
-              candidates :: [Entry.t()]
+              candidates :: [Entry.t()],
+              context :: context()
             ) :: {:ok, verdict()} | {:error, term()}
 end

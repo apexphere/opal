@@ -11,13 +11,13 @@ defmodule SymphonyElixir.Curator.Critics.Stub do
       :approve
       {:reject, "reason text"}
       {:conflict, "slug", "reason text"}
-      {:fn, fn article_body, summaries, candidates -> {:ok, verdict} end}
+      {:fn, fn article_body, summaries, candidates, context -> {:ok, verdict} end}
   """
 
   @behaviour SymphonyElixir.Curator.Critic
 
   @impl true
-  def critique(article_body, summaries, candidates) do
+  def critique(article_body, summaries, candidates, context) do
     case Application.get_env(:symphony_elixir, :curator_stub_critic) do
       nil ->
         {:error, :stub_critic_not_configured}
@@ -31,8 +31,8 @@ defmodule SymphonyElixir.Curator.Critics.Stub do
       {:conflict, slug, reason} ->
         {:ok, {:conflict, slug, reason}}
 
-      {:fn, fun} when is_function(fun, 3) ->
-        fun.(article_body, summaries, candidates)
+      {:fn, fun} when is_function(fun, 4) ->
+        fun.(article_body, summaries, candidates, context)
     end
   end
 end

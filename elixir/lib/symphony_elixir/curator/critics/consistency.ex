@@ -19,8 +19,8 @@ defmodule SymphonyElixir.Curator.Critics.Consistency do
   alias SymphonyElixir.Wiki.Entry
 
   @impl true
-  def critique(article_body, summaries, candidates) do
-    prompt = build_prompt(article_body, summaries, candidates)
+  def critique(article_body, summaries, candidates, context) do
+    prompt = build_prompt(article_body, summaries, candidates, context)
 
     case run_claude(command(), prompt) do
       {:ok, raw_output} ->
@@ -33,8 +33,9 @@ defmodule SymphonyElixir.Curator.Critics.Consistency do
   end
 
   @doc false
-  @spec build_prompt(String.t(), [Entry.summary()], [Entry.t()]) :: String.t()
-  def build_prompt(article_body, summaries, candidates) do
+  @spec build_prompt(String.t(), [Entry.summary()], [Entry.t()], SymphonyElixir.Curator.Critic.context()) ::
+          String.t()
+  def build_prompt(article_body, summaries, candidates, _context) do
     summaries_section =
       Enum.map_join(summaries, "\n", &"- #{&1.slug} | #{&1.topic} | #{&1.title} | #{&1.one_line}")
 
