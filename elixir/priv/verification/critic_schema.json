@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "reason", "missing_coverage"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["approve", "reject"]},
+    "reason": {"type": "string"},
+    "missing_coverage": {"type": "string"}
+  }
+}
