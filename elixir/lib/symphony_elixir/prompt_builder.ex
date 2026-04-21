@@ -125,8 +125,16 @@ defmodule SymphonyElixir.PromptBuilder do
   end
 
   defp to_solid_map(map) when is_map(map) do
-    Map.new(map, fn {key, value} -> {to_string(key), to_solid_value(value)} end)
+    map
+    |> Map.new(fn {key, value} -> {to_string(key), to_solid_value(value)} end)
+    |> join_labels()
   end
+
+  defp join_labels(%{"labels" => labels} = map) when is_list(labels) do
+    %{map | "labels" => Enum.join(labels, ", ")}
+  end
+
+  defp join_labels(map), do: map
 
   defp to_solid_value(%DateTime{} = value), do: DateTime.to_iso8601(value)
   defp to_solid_value(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)

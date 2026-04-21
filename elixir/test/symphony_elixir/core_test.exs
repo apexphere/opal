@@ -834,7 +834,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Add a thing"
     assert prompt =~ "state=In Progress"
     assert prompt =~ "url=https://example.org/issues/MT-42"
-    assert prompt =~ "labels=backendpriority"
+    assert prompt =~ "labels=backend, priority"
   end
 
   test "prompt builder still resolves legacy issue.X variables for backwards compat" do
