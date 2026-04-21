@@ -15,10 +15,19 @@ The image expects two volumes and two environment variables:
 
 | Path / var      | Purpose                                        |
 | --------------- | ---------------------------------------------- |
-| `/project`      | Bind-mount of the project Opal is working on   |
+| `/project`      | Bind-mount of the project Opal clones per issue |
 | `/workspace`    | Bind-mount where per-issue workspaces are kept |
 | `GITHUB_TOKEN`  | GitHub PAT or GitHub App token                 |
 | `GITHUB_REPO`   | `owner/repo` (only used by the default config) |
+
+Before starting, make sure the target repo has labels for Opal's default issue states:
+
+- `todo`
+- `in-progress`
+- `human-review`
+
+Open issues with the `todo` label are eligible for pickup. Opal swaps the state label as work
+progresses; closing the issue represents `Done` / `Closed`.
 
 Minimal invocation:
 
@@ -53,14 +62,19 @@ The entrypoint picks the first match it finds:
 2. `/etc/opal/default-WORKFLOW.md` — the image's built-in default
 
 The default WORKFLOW.md ships with `tracker.kind: github`, `agent.runtime:
-claude-code`, and an empty prompt body — which causes Opal to use its built-in
-generic project-adaptive prompt. That prompt tells the agent to read your
-project's `CLAUDE.md` / `AGENTS.md` / `README.md` / `CONTRIBUTING.md` and
-follow them as authoritative.
+claude-code`, an `after_create` hook that runs `git clone /project .` inside
+each new issue workspace, and an empty prompt body — which causes Opal to use
+its built-in generic project-adaptive prompt. That prompt tells the agent to
+read your project's `CLAUDE.md` / `AGENTS.md` / `README.md` /
+`CONTRIBUTING.md` and follow them as authoritative.
 
 In other words: a project with no Opal-specific config gets sensible defaults.
 A project that wants to customize anything just drops a `WORKFLOW.md` at its
 root.
+
+The default config is intentionally narrow: GitHub Issues + Claude Code +
+Docker workspaces. Linear and Codex are still available in the Elixir
+implementation for compatibility, but they are not the default Docker path.
 
 ## Project agent docs
 
@@ -78,6 +92,15 @@ You don't need to do anything special — just have those files in your repo.
 Drop a `WORKFLOW.md` at your project root with YAML front matter and an
 optional Liquid template body. See the repo-root `WORKFLOW.example.md` for a
 ready-to-copy starting point.
+
+Common overrides:
+
+- `tracker.labels_prefix` namespaces state labels, for example `opal:todo`.
+- `agent.max_concurrent_agents` raises or lowers the number of issues Opal may work at once.
+- `hooks.after_create` can replace the default `git clone /project .` bootstrap if a project needs
+  a different checkout or setup flow.
+- `verification.enabled` and `verification.required` turn the self-verification gate on for a
+  project before it becomes the Docker default.
 
 ## Image contents
 

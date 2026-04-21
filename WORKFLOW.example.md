@@ -1,18 +1,18 @@
 ---
-# Sample WORKFLOW.md for projects that want Opal to work on their issues.
+# Sample WORKFLOW.md for projects that want to customize Opal's default flow.
 # Drop this at your project root as `WORKFLOW.md`, fill in `repo`, and
 # run Opal via Docker (see docker/README.md).
 
 tracker:
-  kind: github                  # or "linear" / "memory"
+  kind: github                  # default; "linear" and "memory" are compatibility/test adapters
   repo: $GITHUB_REPO            # owner/repo — env var or hardcoded
   api_key: $GITHUB_TOKEN        # GitHub PAT or App token
   active_states: ["Todo", "In Progress"]
   terminal_states: ["Done", "Closed"]
-  # labels_prefix: "opal:"      # optional — namespace state labels
+  # labels_prefix: "opal:"      # optional — namespaces labels like opal:todo
 
 agent:
-  runtime: claude-code          # or "codex"
+  runtime: claude-code          # default; "codex" is a compatibility runtime
   max_concurrent_agents: 1      # how many issues to work in parallel
   max_turns: 20                 # max agent turns per issue
 
@@ -32,13 +32,15 @@ claude_code:
 #   after_create: "git clone $REPO_URL ."
 #   before_run: "make setup"
 #   after_run: "make test"
----
 
-# Optional: project-specific prompt body (Liquid template).
+# Optional self-verification gate. This is the product direction, but projects
+# can opt in before it becomes mandatory in the Docker default.
+# verification:
+#   enabled: true
+#   required: true
 #
-# Leave this section empty to use Opal's built-in generic project-adaptive
-# prompt (which tells the agent to read your CLAUDE.md / AGENTS.md /
-# README.md / CONTRIBUTING.md and follow them as authoritative).
+# Optional: add a project-specific prompt body after the second `---`.
+# Leave the body empty to use Opal's built-in generic project-adaptive prompt.
 #
 # Available template variables:
 #   {{ task.number }}       — issue identifier (e.g. "#42" or "MT-123")
@@ -50,3 +52,4 @@ claude_code:
 #   {{ attempt }}            — retry attempt number (only on retries)
 #
 # (Legacy `{{ issue.X }}` aliases also work.)
+---
