@@ -397,6 +397,12 @@ defmodule SymphonyElixir.Orchestrator do
     build_verify_settings(settings, metadata, workspace_path)
   end
 
+  @doc false
+  @spec verify_metadata_from_running_for_test(map()) :: map()
+  def verify_metadata_from_running_for_test(running_entry) when is_map(running_entry) do
+    verify_metadata_from_running(running_entry)
+  end
+
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -1046,7 +1052,7 @@ defmodule SymphonyElixir.Orchestrator do
     prior_rejections = Map.get(state.critic_rejection_attempts, issue_id, 0)
     max_rejections = critic_max_rejections()
 
-    if prior_rejections + 1 >= max_rejections do
+    if prior_rejections + 1 > max_rejections do
       Logger.warning(
         "Critic rejection cap reached for issue_id=#{issue_id} issue_identifier=#{Map.get(entry, :identifier)} rejections=#{prior_rejections + 1} cap=#{max_rejections}; falling through to :fail"
       )
@@ -1110,6 +1116,18 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp critic_max_rejections do
     Config.settings!().verification.critic_max_rejections
+  end
+
+  defp verify_metadata_from_running(running_entry) do
+    issue = Map.get(running_entry, :issue)
+
+    %{
+      identifier: Map.get(running_entry, :identifier),
+      worker_host: Map.get(running_entry, :worker_host),
+      workspace_path: Map.get(running_entry, :workspace_path),
+      issue_title: issue && Map.get(issue, :title),
+      issue_description: issue && Map.get(issue, :description)
+    }
   end
 
   defp build_verify_settings(settings, metadata, workspace_path) do
@@ -1213,11 +1231,7 @@ defmodule SymphonyElixir.Orchestrator do
         {_, state} = pop_running_entry(state, issue_id)
         state = record_session_completion_totals(state, running_entry)
 
-        start_verification(state, issue_id, %{
-          identifier: running_entry.identifier,
-          worker_host: Map.get(running_entry, :worker_host),
-          workspace_path: Map.get(running_entry, :workspace_path)
-        })
+        start_verification(state, issue_id, verify_metadata_from_running(running_entry))
     end
   end
 

@@ -88,7 +88,38 @@ defmodule SymphonyElixir.OrchestratorCriticTest do
       assert Map.has_key?(updated.retry_attempts, issue_id)
     end
 
-    test "third rejection (cap=2) falls through to :fail handling" do
+    test "second rejection (cap=2) still retries — equals-cap allowed" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        verification_enabled: true,
+        tracker_active_states: ["Todo", "In Progress"]
+      )
+
+      Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+      issue_id = "issue-reject-boundary"
+      identifier = "OPAL-2004"
+
+      state =
+        base_state(issue_id, identifier)
+        # Seed with 1 prior rejection so this becomes the 2nd — at cap but allowed.
+        |> Map.put(:critic_rejection_attempts, %{issue_id => 1})
+
+      updated =
+        Orchestrator.apply_verification_outcome_for_test(
+          state,
+          issue_id,
+          entry(identifier),
+          :rejected,
+          rejected_outcome()
+        )
+
+      # At cap: counter bumped to 2, retry still scheduled.
+      assert Map.get(updated.critic_rejection_attempts, issue_id) == 2
+      assert Map.has_key?(updated.retry_attempts, issue_id)
+    end
+
+    test "rejection past cap (cap=2) falls through to :fail handling" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
         verification_enabled: true,
@@ -102,8 +133,8 @@ defmodule SymphonyElixir.OrchestratorCriticTest do
 
       state =
         base_state(issue_id, identifier)
-        # Seed with 1 prior rejection so this becomes the 2nd — equals cap.
-        |> Map.put(:critic_rejection_attempts, %{issue_id => 1})
+        # Seed with 2 prior rejections so this becomes the 3rd — past cap.
+        |> Map.put(:critic_rejection_attempts, %{issue_id => 2})
 
       assert Config.settings!().verification.critic_max_rejections == 2
 
@@ -229,6 +260,28 @@ defmodule SymphonyElixir.OrchestratorCriticTest do
 
       assert result.task_summary == "Add JSON\n\nbody"
       assert is_binary(result.diff)
+    end
+  end
+
+  describe "verify_metadata_from_running" do
+    test "forwards issue title and description so the critic sees task context" do
+      running_entry = %{
+        identifier: "OPAL-42",
+        worker_host: nil,
+        workspace_path: "/tmp/ws",
+        issue: %Issue{
+          identifier: "OPAL-42",
+          title: "Add critic gate",
+          description: "Reject unit-test-shaped verify recipes."
+        }
+      }
+
+      metadata = Orchestrator.verify_metadata_from_running_for_test(running_entry)
+
+      assert metadata.identifier == "OPAL-42"
+      assert metadata.workspace_path == "/tmp/ws"
+      assert metadata.issue_title == "Add critic gate"
+      assert metadata.issue_description == "Reject unit-test-shaped verify recipes."
     end
   end
 end
