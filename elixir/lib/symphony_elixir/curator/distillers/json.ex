@@ -44,6 +44,8 @@ defmodule SymphonyElixir.Curator.Distillers.Json do
       related: [],
       confidence: Map.get(payload, "confidence", "medium"),
       status: "active",
+      perfect_for: normalize_bullets(Map.get(payload, "perfect_for", [])),
+      not_ideal_for: normalize_bullets(Map.get(payload, "not_ideal_for", [])),
       body: Map.get(payload, "body", "")
     }
 
@@ -60,4 +62,15 @@ defmodule SymphonyElixir.Curator.Distillers.Json do
   defp build_proposal(payload, _raw) do
     {:error, {:unknown_decision, Map.get(payload, "decision")}}
   end
+
+  defp normalize_bullets(list) when is_list(list) do
+    list
+    |> Enum.map(fn
+      value when is_binary(value) -> String.trim(value)
+      value -> to_string(value)
+    end)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp normalize_bullets(_), do: []
 end

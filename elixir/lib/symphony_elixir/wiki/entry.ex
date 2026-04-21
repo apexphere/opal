@@ -18,6 +18,12 @@ defmodule SymphonyElixir.Wiki.Entry do
       related: [react-strictmode]
       confidence: high
       status: active
+      perfect_for:
+        - components that subscribe to external data
+        - timers or intervals tied to component lifetime
+      not_ideal_for:
+        - server-side rendering paths
+        - effects with empty dep arrays that never re-fire
       ---
       # body markdown
 
@@ -36,6 +42,8 @@ defmodule SymphonyElixir.Wiki.Entry do
             related: [],
             confidence: "medium",
             status: "active",
+            perfect_for: [],
+            not_ideal_for: [],
             body: ""
 
   @type source :: %{
@@ -55,6 +63,8 @@ defmodule SymphonyElixir.Wiki.Entry do
           related: [String.t()],
           confidence: String.t(),
           status: String.t(),
+          perfect_for: [String.t()],
+          not_ideal_for: [String.t()],
           body: String.t()
         }
 
@@ -175,6 +185,8 @@ defmodule SymphonyElixir.Wiki.Entry do
     revision = Map.get(attrs, "revision", 1)
     sources = normalize_sources(Map.get(attrs, "sources", []))
     related = normalize_related(Map.get(attrs, "related", []))
+    perfect_for = normalize_string_list(Map.get(attrs, "perfect_for", []))
+    not_ideal_for = normalize_string_list(Map.get(attrs, "not_ideal_for", []))
 
     {:ok,
      %{
@@ -188,9 +200,22 @@ defmodule SymphonyElixir.Wiki.Entry do
        related: related,
        confidence: Map.get(attrs, "confidence", "medium"),
        status: Map.get(attrs, "status", "active"),
+       perfect_for: perfect_for,
+       not_ideal_for: not_ideal_for,
        body: body
      }}
   end
+
+  defp normalize_string_list(list) when is_list(list) do
+    list
+    |> Enum.map(fn
+      value when is_binary(value) -> String.trim(value)
+      value -> to_string(value)
+    end)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp normalize_string_list(_), do: []
 
   defp normalize_sources(list) when is_list(list) do
     Enum.map(list, fn
@@ -261,7 +286,19 @@ defmodule SymphonyElixir.Wiki.Entry do
       "confidence: #{entry.confidence}\n",
       "status: #{entry.status}\n",
       serialize_sources(entry.sources),
-      serialize_related(entry.related)
+      serialize_related(entry.related),
+      serialize_string_list("perfect_for", entry.perfect_for),
+      serialize_string_list("not_ideal_for", entry.not_ideal_for)
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  defp serialize_string_list(key, []), do: "#{key}: []\n"
+
+  defp serialize_string_list(key, items) do
+    [
+      "#{key}:\n",
+      Enum.map(items, fn item -> "  - #{escape_yaml_string(item)}\n" end)
     ]
     |> IO.iodata_to_binary()
   end
