@@ -79,7 +79,7 @@ defmodule SymphonyElixir.GoldenPathTest do
       ]
     end
 
-    defp recipe_steps(_mode, identifier) do
+    defp recipe_steps(:pass, identifier) do
       [
         %{
           "name" => "workspace has cloned repo and issue branch",
@@ -87,6 +87,10 @@ defmodule SymphonyElixir.GoldenPathTest do
           "expect_exit" => 0
         }
       ]
+    end
+
+    defp recipe_steps(mode, _identifier) do
+      raise ArgumentError, "unknown golden path recipe mode: #{inspect(mode)}"
     end
 
     defp mark_issue_closed!(%Issue{} = issue) do
@@ -210,7 +214,13 @@ defmodule SymphonyElixir.GoldenPathTest do
       create_source_repo!(source_repo)
       File.mkdir_p!(workspace_root)
 
-      issue = golden_issue(id: "issue-golden-fail", identifier: "OPAL-53", issue_number: 53)
+      issue =
+        golden_issue(
+          id: "issue-golden-fail",
+          identifier: "OPAL-53",
+          url: "https://github.com/apexphere/opal/issues/53"
+        )
+
       Application.put_env(:symphony_elixir, :golden_path_test_recipe_mode, :fail)
       Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
 
@@ -246,16 +256,17 @@ defmodule SymphonyElixir.GoldenPathTest do
       assert_receive {:memory_tracker_state_update, "issue-golden-fail", "Closed"}, 1_000
       assert_receive {:memory_tracker_state_update, "issue-golden-fail", "In Progress"}, 3_000
 
-      assert :ok =
-               wait_until(fn ->
+      assert {:ok, %{retry_entry: retry_entry, state: state}} =
+               wait_until_value(fn ->
                  state = :sys.get_state(pid)
+                 retry_entry = state.retry_attempts[issue.id]
 
-                 not Map.has_key?(state.running, issue.id) and
-                   not Map.has_key?(state.verifying, issue.id) and
-                   Map.has_key?(state.retry_attempts, issue.id)
+                 if not Map.has_key?(state.running, issue.id) and
+                      not Map.has_key?(state.verifying, issue.id) and retry_entry do
+                   %{retry_entry: retry_entry, state: state}
+                 end
                end)
 
-      state = :sys.get_state(pid)
       assert File.exists?(workspace)
       assert MapSet.member?(state.claimed, issue.id)
       assert MapSet.member?(state.completed, issue.id)
@@ -264,7 +275,7 @@ defmodule SymphonyElixir.GoldenPathTest do
                attempt: 1,
                identifier: "OPAL-53",
                workspace_path: ^workspace
-             } = state.retry_attempts[issue.id]
+             } = retry_entry
 
       verify_log = workspace |> Path.join(".opal/verify-log.json") |> File.read!() |> Jason.decode!()
       assert verify_log["status"] == "fail"
@@ -298,7 +309,7 @@ defmodule SymphonyElixir.GoldenPathTest do
       title: "Exercise the golden path",
       description: "Prove the default flow with local fakes.",
       state: "Todo",
-      url: "https://github.com/apexphere/opal/issues/#{Keyword.get(overrides, :issue_number, 47)}",
+      url: Keyword.get(overrides, :url, "https://github.com/apexphere/opal/issues/47"),
       labels: ["todo"],
       created_at: ~U[2026-04-21 00:00:00Z]
     }
@@ -350,6 +361,24 @@ defmodule SymphonyElixir.GoldenPathTest do
     else
       Process.sleep(delay_ms)
       wait_until(fun, attempts - 1, delay_ms)
+    end
+  end
+
+  defp wait_until_value(fun, attempts \\ 200, delay_ms \\ 25)
+  defp wait_until_value(_fun, 0, _delay_ms), do: :timeout
+
+  defp wait_until_value(fun, attempts, delay_ms) do
+    case fun.() do
+      nil ->
+        Process.sleep(delay_ms)
+        wait_until_value(fun, attempts - 1, delay_ms)
+
+      false ->
+        Process.sleep(delay_ms)
+        wait_until_value(fun, attempts - 1, delay_ms)
+
+      value ->
+        {:ok, value}
     end
   end
 end
