@@ -18,11 +18,22 @@ defmodule SymphonyElixir.VerificationTest do
   end
 
   defp settings(opts \\ []) do
-    %{
+    base = %{
       enabled: true,
       required: Keyword.get(opts, :required, false),
       step_timeout_ms: Keyword.get(opts, :step_timeout_ms, 5_000)
     }
+
+    Enum.reduce(
+      [:critic_enabled, :critic_timeout_ms, :task_summary, :diff, :critic_fun],
+      base,
+      fn key, acc ->
+        case Keyword.fetch(opts, key) do
+          {:ok, value} -> Map.put(acc, key, value)
+          :error -> acc
+        end
+      end
+    )
   end
 
   defp write_recipe!(workspace, steps, description \\ nil) do
@@ -152,5 +163,201 @@ defmodule SymphonyElixir.VerificationTest do
 
     log = Path.join(workspace, ".opal/verify-log.json") |> File.read!() |> Jason.decode!()
     assert [%{"exit" => "timeout"}] = log["steps"]
+  end
+
+  describe "critic gate" do
+    import ExUnit.CaptureLog
+
+    test "critic disabled (default) does not invoke the critic", %{workspace: workspace} do
+      write_recipe!(workspace, [%{"name" => "ok", "shell" => "true"}])
+      test_pid = self()
+
+      critic_fun = fn _, _, _, _ ->
+        send(test_pid, :critic_called)
+        {:ok, :approve}
+      end
+
+      # critic_enabled defaults off — critic_fun should be ignored.
+      outcome = Verification.verify(workspace, settings(critic_fun: critic_fun))
+
+      assert outcome.status == :pass
+      refute_received :critic_called
+    end
+
+    test "critic enabled + approve allows recipe to execute", %{workspace: workspace} do
+      write_recipe!(workspace, [%{"name" => "ok", "shell" => "true"}])
+      test_pid = self()
+
+      critic_fun = fn task_summary, diff, recipe_json, _opts ->
+        send(test_pid, {:critic_called, task_summary, diff, recipe_json})
+        {:ok, :approve}
+      end
+
+      outcome =
+        Verification.verify(
+          workspace,
+          settings(
+            critic_enabled: true,
+            critic_fun: critic_fun,
+            task_summary: "Add --json flag",
+            diff: "+ new line"
+          )
+        )
+
+      assert outcome.status == :pass
+      assert outcome.rejection == nil
+
+      assert_received {:critic_called, "Add --json flag", "+ new line", recipe_json}
+      # Recipe body should be serialized JSON the critic can read.
+      decoded = Jason.decode!(recipe_json)
+      assert [%{"name" => "ok", "shell" => "true"}] = decoded["steps"]
+    end
+
+    test "critic enabled + reject short-circuits and returns :rejected", %{workspace: workspace} do
+      write_recipe!(workspace, [
+        %{"name" => "should-never-run", "shell" => "echo NOPE && exit 1"}
+      ])
+
+      critic_fun = fn _, _, _, _ ->
+        {:ok, {:reject, %{reason: "unit-tests-only", missing_coverage: "no HTTP call"}}}
+      end
+
+      outcome =
+        Verification.verify(
+          workspace,
+          settings(critic_enabled: true, critic_fun: critic_fun)
+        )
+
+      assert outcome.status == :rejected
+      assert outcome.rejection == %{reason: "unit-tests-only", missing_coverage: "no HTTP call"}
+      assert outcome.steps == []
+
+      log = Path.join(workspace, ".opal/verify-log.json") |> File.read!() |> Jason.decode!()
+      assert log["status"] == "rejected"
+      assert log["rejection"] == %{"reason" => "unit-tests-only", "missing_coverage" => "no HTTP call"}
+      assert log["steps"] == []
+    end
+
+    test "critic error falls open to recipe execution with a warning", %{workspace: workspace} do
+      write_recipe!(workspace, [%{"name" => "ok", "shell" => "true"}])
+
+      critic_fun = fn _, _, _, _ ->
+        {:error, {:codex_command_not_found, "codex"}}
+      end
+
+      log =
+        capture_log(fn ->
+          outcome =
+            Verification.verify(
+              workspace,
+              settings(critic_enabled: true, critic_fun: critic_fun)
+            )
+
+          assert outcome.status == :pass
+        end)
+
+      assert log =~ "Verification critic failed"
+      assert log =~ "codex_command_not_found"
+    end
+
+    test "critic crash via raise falls open", %{workspace: workspace} do
+      write_recipe!(workspace, [%{"name" => "ok", "shell" => "true"}])
+
+      critic_fun = fn _, _, _, _ ->
+        raise "boom"
+      end
+
+      log =
+        capture_log(fn ->
+          outcome =
+            Verification.verify(
+              workspace,
+              settings(critic_enabled: true, critic_fun: critic_fun)
+            )
+
+          assert outcome.status == :pass
+        end)
+
+      assert log =~ "Verification critic failed"
+      assert log =~ "critic_crashed"
+    end
+
+    test "critic crash via throw/exit falls open", %{workspace: workspace} do
+      # Exercises the `catch kind, reason` branch (non-exception exits).
+      write_recipe!(workspace, [%{"name" => "ok", "shell" => "true"}])
+
+      critic_fun = fn _, _, _, _ ->
+        throw(:weird_signal)
+      end
+
+      log =
+        capture_log(fn ->
+          outcome =
+            Verification.verify(
+              workspace,
+              settings(critic_enabled: true, critic_fun: critic_fun)
+            )
+
+          assert outcome.status == :pass
+        end)
+
+      assert log =~ "Verification critic failed"
+      assert log =~ "critic_crashed"
+      assert log =~ "weird_signal"
+    end
+
+    test "critic timeout falls open", %{workspace: workspace} do
+      write_recipe!(workspace, [%{"name" => "ok", "shell" => "true"}])
+
+      critic_fun = fn _, _, _, _ ->
+        Process.sleep(500)
+        {:ok, :approve}
+      end
+
+      log =
+        capture_log(fn ->
+          outcome =
+            Verification.verify(
+              workspace,
+              settings(
+                critic_enabled: true,
+                critic_fun: critic_fun,
+                critic_timeout_ms: 50
+              )
+            )
+
+          assert outcome.status == :pass
+        end)
+
+      assert log =~ "Verification critic timed out"
+    end
+
+    test "rejected outcome is not executed — executor never invoked", %{workspace: workspace} do
+      # Use the pluggable executor to prove it never runs.
+      defmodule NeverCalledExecutor do
+        @behaviour SymphonyElixir.Verification.Executor
+        @impl true
+        def run_step(_step, _workspace, _opts) do
+          send(self(), :executor_ran)
+          %{exit: 0, output: "", duration_ms: 1}
+        end
+      end
+
+      Application.put_env(:symphony_elixir, :verification_executor_module, NeverCalledExecutor)
+      write_recipe!(workspace, [%{"name" => "unused", "shell" => "true"}])
+
+      critic_fun = fn _, _, _, _ ->
+        {:ok, {:reject, %{reason: "r", missing_coverage: "m"}}}
+      end
+
+      outcome =
+        Verification.verify(
+          workspace,
+          settings(critic_enabled: true, critic_fun: critic_fun)
+        )
+
+      assert outcome.status == :rejected
+      refute_received :executor_ran
+    end
   end
 end

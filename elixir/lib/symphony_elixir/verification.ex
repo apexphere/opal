@@ -10,30 +10,54 @@ defmodule SymphonyElixir.Verification do
   * Each step is executed sequentially via the configured executor (default
     `Executor.Bash`). A step passes when its exit code matches `expect_exit`.
   * The full execution log is persisted to `<workspace>/.opal/verify-log.json`.
-  * The result is `:pass`, `:fail`, or `:skipped` — Phase 1 has no
-    re-prompting loop. Phase 2 will feed failure evidence into the next
-    agent turn.
+  * The result is `:pass`, `:fail`, `:skipped`, or `:rejected`. `:rejected`
+    is produced by the optional critic gate (see below) when the recipe is
+    judged not to exercise the user-visible behaviour the diff introduces.
 
-  Behaviour is gated by `config.verification.enabled`. When the flag is off
-  this module is never called. When on but no recipe exists, behaviour
-  depends on `config.verification.required`:
+  Critic gate (default off):
+  * When `settings.critic_enabled` is true, an independent-runtime critic
+    (`SymphonyElixir.Verification.Critic`) is invoked between reading the
+    recipe and executing it. On `:approve`, execution proceeds. On
+    `{:reject, %{reason, missing_coverage}}`, execution is short-circuited
+    and an outcome with `status: :rejected` is returned. On critic error
+    (codex missing, timeout, decode error) the call **fails open**: a
+    warning is logged and execution proceeds as if the critic were
+    disabled. This avoids blocking delivery on critic flakes.
+  * Timeout is enforced at the caller via `Task.async` + `Task.yield` —
+    `System.cmd/3` itself has no timeout.
+
+  Behaviour is gated by `settings.enabled`. When the flag is off this
+  module is never called. When on but no recipe exists, behaviour depends
+  on `settings.required`:
   * `required: false` (default) — skip with `:no_recipe` reason.
   * `required: true`           — fail.
   """
 
   require Logger
 
-  alias SymphonyElixir.Verification.{Recipe, Result}
+  alias SymphonyElixir.Verification.{Critic, Recipe, Result}
 
   @log_rel_path ".opal/verify-log.json"
+  @default_critic_timeout_ms 180_000
 
-  @type settings :: %{required(:required) => boolean(), required(:step_timeout_ms) => pos_integer()}
-  @type status :: :pass | :fail | :skipped
+  @type rejection :: %{reason: String.t(), missing_coverage: String.t()}
+  @type status :: :pass | :fail | :skipped | :rejected
+  @type settings :: %{
+          optional(:critic_enabled) => boolean(),
+          optional(:critic_timeout_ms) => pos_integer(),
+          optional(:task_summary) => String.t(),
+          optional(:diff) => String.t(),
+          optional(:critic_fun) => (String.t(), String.t(), String.t(), keyword() ->
+                                      {:ok, Critic.verdict()} | {:error, term()}),
+          required(:required) => boolean(),
+          required(:step_timeout_ms) => pos_integer()
+        }
   @type outcome :: %{
           status: status(),
           steps: [map()],
           skipped_reason: term() | nil,
           recipe: Recipe.t() | nil,
+          rejection: rejection() | nil,
           started_at: DateTime.t(),
           finished_at: DateTime.t()
         }
@@ -45,7 +69,7 @@ defmodule SymphonyElixir.Verification do
     outcome =
       case Recipe.read(workspace) do
         {:ok, recipe} ->
-          execute(recipe, workspace, settings, started_at)
+          gated_execute(recipe, workspace, settings, started_at)
 
         {:error, :no_recipe} when settings.required ->
           fail_outcome(:no_recipe, started_at)
@@ -63,6 +87,93 @@ defmodule SymphonyElixir.Verification do
 
   @spec log_rel_path() :: String.t()
   def log_rel_path, do: @log_rel_path
+
+  defp gated_execute(%Recipe{} = recipe, workspace, settings, started_at) do
+    case maybe_critique(recipe, settings) do
+      :approve ->
+        execute(recipe, workspace, settings, started_at)
+
+      {:reject, rejection} ->
+        reject_outcome(recipe, rejection, started_at)
+    end
+  end
+
+  defp maybe_critique(%Recipe{} = recipe, %{critic_enabled: true} = settings) do
+    task_summary = Map.get(settings, :task_summary, "")
+    diff = Map.get(settings, :diff, "")
+    recipe_json = serialize_recipe(recipe)
+
+    case run_critic(task_summary, diff, recipe_json, settings) do
+      {:ok, :approve} ->
+        :approve
+
+      {:ok, {:reject, %{reason: _, missing_coverage: _} = rejection}} ->
+        {:reject, rejection}
+
+      {:error, reason} ->
+        Logger.warning("Verification critic failed (fail-open): #{inspect(reason)}")
+
+        :approve
+
+      :timeout ->
+        Logger.warning("Verification critic timed out (fail-open)")
+        :approve
+    end
+  end
+
+  defp maybe_critique(_recipe, _settings), do: :approve
+
+  defp serialize_recipe(%Recipe{description: description, steps: steps}) do
+    %{
+      "description" => description,
+      "steps" =>
+        Enum.map(steps, fn step ->
+          %{
+            "name" => step.name,
+            "shell" => step.shell,
+            "expect_exit" => step.expect_exit
+          }
+        end)
+    }
+    |> Jason.encode!()
+  end
+
+  defp run_critic(task_summary, diff, recipe_json, settings) do
+    critic_fun = Map.get(settings, :critic_fun) || (&Critic.critique/4)
+    timeout_ms = Map.get(settings, :critic_timeout_ms, @default_critic_timeout_ms)
+
+    parent = self()
+    ref = make_ref()
+
+    # Spawn an unlinked process. A try/rescue inside converts any crash —
+    # raise, throw, or exit — into a tagged `:error` tuple so exits never
+    # escape this boundary. The parent only ever receives the `{ref, result}`
+    # message or hits the timeout.
+    {pid, monitor_ref} =
+      spawn_monitor(fn ->
+        result =
+          try do
+            critic_fun.(task_summary, diff, recipe_json, [])
+          rescue
+            error -> {:error, {:critic_crashed, Exception.message(error)}}
+          catch
+            kind, reason -> {:error, {:critic_crashed, {kind, reason}}}
+          end
+
+        send(parent, {ref, result})
+      end)
+
+    receive do
+      {^ref, result} ->
+        Process.demonitor(monitor_ref, [:flush])
+        result
+    after
+      timeout_ms ->
+        Process.demonitor(monitor_ref, [:flush])
+        Process.exit(pid, :kill)
+        :timeout
+    end
+  end
 
   defp execute(%Recipe{steps: steps} = recipe, workspace, settings, started_at) do
     executor = executor_module()
@@ -96,6 +207,19 @@ defmodule SymphonyElixir.Verification do
       steps: Enum.reverse(step_results),
       skipped_reason: nil,
       recipe: recipe,
+      rejection: nil,
+      started_at: started_at,
+      finished_at: DateTime.utc_now()
+    }
+  end
+
+  defp reject_outcome(%Recipe{} = recipe, rejection, started_at) do
+    %{
+      status: :rejected,
+      steps: [],
+      skipped_reason: nil,
+      recipe: recipe,
+      rejection: rejection,
       started_at: started_at,
       finished_at: DateTime.utc_now()
     }
@@ -107,6 +231,7 @@ defmodule SymphonyElixir.Verification do
       steps: [],
       skipped_reason: reason,
       recipe: nil,
+      rejection: nil,
       started_at: started_at,
       finished_at: DateTime.utc_now()
     }
@@ -118,6 +243,7 @@ defmodule SymphonyElixir.Verification do
       steps: [],
       skipped_reason: reason,
       recipe: nil,
+      rejection: nil,
       started_at: started_at,
       finished_at: DateTime.utc_now()
     }

@@ -1,0 +1,384 @@
+diff --git a/elixir/lib/symphony_elixir/config.ex b/elixir/lib/symphony_elixir/config.ex
+index 639ed32..1d8dc63 100644
+--- a/elixir/lib/symphony_elixir/config.ex
++++ b/elixir/lib/symphony_elixir/config.ex
+@@ -29,6 +29,17 @@ defmodule SymphonyElixir.Config do
+   Treat the project's own instructions as authoritative. They override any
+   generic guidance below when they conflict.
+ 
++  ## CRITICAL: branch before you touch any code
++
++  The workspace has already been checked out on a branch named after this task.
++  Verify with `git branch --show-current` before doing anything else. If the
++  output is `main` or `master`, stop and run `git checkout -b opal/{{ task.number }}`
++  before making any changes. **Never commit to or push to `main`/`master` directly.**
++  A pre-push hook will reject any such push.
++
++  Once on a branch, the workflow is: implement → test → commit → push branch →
++  open pull request. The PR must link back to this task.
++
+   ## Execution rules
+ 
+   1. Understand the project first — read its docs, scan its structure, learn
+@@ -36,8 +47,8 @@ defmodule SymphonyElixir.Config do
+   2. Work autonomously. Do not ask for human input unless you are truly
+      blocked.
+   3. Follow the project's own testing, formatting, and code style conventions.
+-  4. Create a branch, implement the change, run the project's tests, commit,
+-     push, and open a pull request that links back to this task.
++  4. Implement the change on your branch, run the project's tests, commit,
++     push the branch, and open a pull request that links back to this task.
+ 
+   {% if attempt %}
+   This is retry attempt #{{ attempt }}. Resume from the current workspace
+diff --git a/elixir/lib/symphony_elixir/config/schema.ex b/elixir/lib/symphony_elixir/config/schema.ex
+index ca56205..43d9b23 100644
+--- a/elixir/lib/symphony_elixir/config/schema.ex
++++ b/elixir/lib/symphony_elixir/config/schema.ex
+@@ -93,12 +93,13 @@ defmodule SymphonyElixir.Config.Schema do
+     @primary_key false
+     embedded_schema do
+       field(:root, :string, default: Path.join(System.tmp_dir!(), "symphony_workspaces"))
++      field(:branch_pattern, :string, default: "opal/{number}")
+     end
+ 
+     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+     def changeset(schema, attrs) do
+       schema
+-      |> cast(attrs, [:root], empty_values: [])
++      |> cast(attrs, [:root, :branch_pattern], empty_values: [])
+     end
+   end
+ 
+diff --git a/elixir/lib/symphony_elixir/workspace.ex b/elixir/lib/symphony_elixir/workspace.ex
+index 455c043..f8b35b3 100644
+--- a/elixir/lib/symphony_elixir/workspace.ex
++++ b/elixir/lib/symphony_elixir/workspace.ex
+@@ -9,6 +9,21 @@ defmodule SymphonyElixir.Workspace do
+ 
+   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
+ 
++  @pre_push_hook_script ~S"""
++  #!/bin/sh
++  # Opal: reject direct pushes to main/master — work on a branch and open a pull request.
++  while IFS=' ' read -r _local_ref _local_sha remote_ref _remote_sha; do
++    case "$remote_ref" in
++      refs/heads/main|refs/heads/master)
++        printf 'error: Opal: direct push to %s is not allowed.\n' "$remote_ref" >&2
++        printf 'error: Create a branch and open a pull request instead.\n' >&2
++        exit 1
++        ;;
++    esac
++  done
++  exit 0
++  """
++
+   @type worker_host :: String.t() | nil
+ 
+   @spec create_for_issue(map() | String.t() | nil, worker_host()) ::
+@@ -23,6 +38,7 @@ defmodule SymphonyElixir.Workspace do
+            :ok <- validate_workspace_path(workspace, worker_host),
+            {:ok, workspace, created?} <- ensure_workspace(workspace, worker_host),
+            :ok <- maybe_run_after_create_hook(workspace, issue_context, created?, worker_host),
++           :ok <- maybe_setup_git_branch(workspace, issue_context, created?, worker_host),
+            :ok <- maybe_inject_knowledge(workspace, issue_context, worker_host) do
+         {:ok, workspace}
+       end
+@@ -250,6 +266,84 @@ defmodule SymphonyElixir.Workspace do
+     end
+   end
+ 
++  defp maybe_setup_git_branch(workspace, issue_context, true, nil) do
++    git_dir = Path.join(workspace, ".git")
++
++    if File.dir?(git_dir) do
++      branch = resolve_branch_name(issue_context)
++
++      with :ok <- create_git_branch_local(workspace, branch) do
++        install_pre_push_hook_local(git_dir)
++      end
++    else
++      :ok
++    end
++  end
++
++  defp maybe_setup_git_branch(workspace, issue_context, true, worker_host) when is_binary(worker_host) do
++    branch = resolve_branch_name(issue_context)
++    hook_content = String.trim_trailing(@pre_push_hook_script)
++
++    script = """
++    set -eu
++    workspace=#{shell_escape(workspace)}
++    if [ -d "$workspace/.git" ]; then
++      cd "$workspace"
++      git checkout -b #{shell_escape(branch)} 2>/dev/null || git checkout #{shell_escape(branch)}
++      mkdir -p "$workspace/.git/hooks"
++      cat > "$workspace/.git/hooks/pre-push" <<'OPAL_HOOK_EOF'
++    #{hook_content}
++    OPAL_HOOK_EOF
++      chmod +x "$workspace/.git/hooks/pre-push"
++    fi
++    """
++
++    case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
++      {:ok, {_output, 0}} -> :ok
++      {:ok, {output, status}} -> {:error, {:git_branch_setup_failed, worker_host, status, output}}
++      {:error, reason} -> {:error, reason}
++    end
++  end
++
++  defp maybe_setup_git_branch(_workspace, _issue_context, _created?, _worker_host), do: :ok
++
++  defp resolve_branch_name(%{issue_identifier: identifier}) do
++    pattern = Config.settings!().workspace.branch_pattern
++    sanitized = git_safe_ref(identifier || "issue")
++    String.replace(pattern, "{number}", sanitized)
++  end
++
++  defp git_safe_ref(value) do
++    value
++    |> String.replace(~r/[^a-zA-Z0-9._\-\/]/, "-")
++    |> String.trim("-")
++    |> then(fn s -> if s == "", do: "issue", else: s end)
++  end
++
++  defp create_git_branch_local(workspace, branch) do
++    case System.cmd("git", ["checkout", "-b", branch], cd: workspace, stderr_to_stdout: true) do
++      {_output, 0} ->
++        :ok
++
++      {_output, _} ->
++        case System.cmd("git", ["checkout", branch], cd: workspace, stderr_to_stdout: true) do
++          {_output, 0} -> :ok
++          {output, status} -> {:error, {:git_branch_setup_failed, :local, status, output}}
++        end
++    end
++  end
++
++  defp install_pre_push_hook_local(git_dir) do
++    hooks_dir = Path.join(git_dir, "hooks")
++    hook_path = Path.join(hooks_dir, "pre-push")
++    hook_content = String.trim_trailing(@pre_push_hook_script)
++
++    with :ok <- File.mkdir_p(hooks_dir),
++         :ok <- File.write(hook_path, hook_content <> "\n") do
++      File.chmod(hook_path, 0o755)
++    end
++  end
++
+   defp maybe_run_before_remove_hook(workspace, nil) do
+     hooks = Config.settings!().hooks
+ 
+diff --git a/elixir/test/support/test_support.exs b/elixir/test/support/test_support.exs
+index 8c877be..d7d5882 100644
+--- a/elixir/test/support/test_support.exs
++++ b/elixir/test/support/test_support.exs
+@@ -103,6 +103,7 @@ defmodule SymphonyElixir.TestSupport do
+           tracker_labels_prefix: nil,
+           poll_interval_ms: 30_000,
+           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
++          workspace_branch_pattern: nil,
+           worker_ssh_hosts: [],
+           worker_max_concurrent_agents_per_host: nil,
+           agent_runtime: "codex",
+@@ -155,6 +156,7 @@ defmodule SymphonyElixir.TestSupport do
+     tracker_labels_prefix = Keyword.get(config, :tracker_labels_prefix)
+     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
+     workspace_root = Keyword.get(config, :workspace_root)
++    workspace_branch_pattern = Keyword.get(config, :workspace_branch_pattern)
+     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
+     worker_max_concurrent_agents_per_host = Keyword.get(config, :worker_max_concurrent_agents_per_host)
+     agent_runtime = Keyword.get(config, :agent_runtime)
+@@ -210,6 +212,7 @@ defmodule SymphonyElixir.TestSupport do
+         "  interval_ms: #{yaml_value(poll_interval_ms)}",
+         "workspace:",
+         "  root: #{yaml_value(workspace_root)}",
++        workspace_branch_pattern && "  branch_pattern: #{yaml_value(workspace_branch_pattern)}",
+         worker_yaml(worker_ssh_hosts, worker_max_concurrent_agents_per_host),
+         "agent:",
+         "  runtime: #{yaml_value(agent_runtime)}",
+diff --git a/elixir/test/symphony_elixir/workspace_and_config_test.exs b/elixir/test/symphony_elixir/workspace_and_config_test.exs
+index 64224b5..6e276ed 100644
+--- a/elixir/test/symphony_elixir/workspace_and_config_test.exs
++++ b/elixir/test/symphony_elixir/workspace_and_config_test.exs
+@@ -1325,4 +1325,180 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
+ 
+     assert message =~ "verification.step_timeout_ms"
+   end
++
++  test "schema parses workspace branch_pattern" do
++    assert {:ok, settings} = Schema.parse(%{workspace: %{branch_pattern: "feat/{number}"}})
++    assert settings.workspace.branch_pattern == "feat/{number}"
++  end
++
++  test "schema defaults workspace branch_pattern to opal/{number}" do
++    assert {:ok, settings} = Schema.parse(%{})
++    assert settings.workspace.branch_pattern == "opal/{number}"
++  end
++
++  test "fresh git workspace is automatically put on an opal branch" do
++    test_root =
++      Path.join(
++        System.tmp_dir!(),
++        "symphony-elixir-git-branch-#{System.unique_integer([:positive])}"
++      )
++
++    try do
++      template_repo = Path.join(test_root, "source")
++      workspace_root = Path.join(test_root, "workspaces")
++
++      File.mkdir_p!(template_repo)
++      File.write!(Path.join(template_repo, "README.md"), "repo\n")
++      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
++      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
++      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
++      System.cmd("git", ["-C", template_repo, "add", "README.md"])
++      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
++
++      write_workflow_file!(Workflow.workflow_file_path(),
++        workspace_root: workspace_root,
++        hook_after_create: "git clone --depth 1 #{template_repo} ."
++      )
++
++      assert {:ok, workspace} = Workspace.create_for_issue("S-29")
++
++      {branch, 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
++      assert String.trim(branch) == "opal/S-29"
++    after
++      File.rm_rf(test_root)
++    end
++  end
++
++  test "pre-push hook is installed in fresh git workspace" do
++    test_root =
++      Path.join(
++        System.tmp_dir!(),
++        "symphony-elixir-prepush-hook-#{System.unique_integer([:positive])}"
++      )
++
++    try do
++      template_repo = Path.join(test_root, "source")
++      workspace_root = Path.join(test_root, "workspaces")
++
++      File.mkdir_p!(template_repo)
++      File.write!(Path.join(template_repo, "README.md"), "repo\n")
++      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
++      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
++      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
++      System.cmd("git", ["-C", template_repo, "add", "README.md"])
++      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
++
++      write_workflow_file!(Workflow.workflow_file_path(),
++        workspace_root: workspace_root,
++        hook_after_create: "git clone --depth 1 #{template_repo} ."
++      )
++
++      assert {:ok, workspace} = Workspace.create_for_issue("S-42")
++
++      hook_path = Path.join([workspace, ".git", "hooks", "pre-push"])
++      assert File.exists?(hook_path)
++      assert File.stat!(hook_path).mode |> Bitwise.band(0o111) != 0
++
++      hook_content = File.read!(hook_path)
++      assert hook_content =~ "refs/heads/main"
++      assert hook_content =~ "refs/heads/master"
++    after
++      File.rm_rf(test_root)
++    end
++  end
++
++  test "custom branch_pattern is applied when branching" do
++    test_root =
++      Path.join(
++        System.tmp_dir!(),
++        "symphony-elixir-custom-pattern-#{System.unique_integer([:positive])}"
++      )
++
++    try do
++      template_repo = Path.join(test_root, "source")
++      workspace_root = Path.join(test_root, "workspaces")
++
++      File.mkdir_p!(template_repo)
++      File.write!(Path.join(template_repo, "README.md"), "repo\n")
++      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
++      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
++      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
++      System.cmd("git", ["-C", template_repo, "add", "README.md"])
++      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
++
++      write_workflow_file!(Workflow.workflow_file_path(),
++        workspace_root: workspace_root,
++        workspace_branch_pattern: "feature/{number}",
++        hook_after_create: "git clone --depth 1 #{template_repo} ."
++      )
++
++      assert {:ok, workspace} = Workspace.create_for_issue("PROJ-99")
++
++      {branch, 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
++      assert String.trim(branch) == "feature/PROJ-99"
++    after
++      File.rm_rf(test_root)
++    end
++  end
++
++  test "non-git workspace skips branch setup without error" do
++    workspace_root =
++      Path.join(
++        System.tmp_dir!(),
++        "symphony-elixir-nongit-#{System.unique_integer([:positive])}"
++      )
++
++    try do
++      write_workflow_file!(Workflow.workflow_file_path(), workspace_root: workspace_root)
++
++      assert {:ok, workspace} = Workspace.create_for_issue("NO-GIT-1")
++      refute File.exists?(Path.join(workspace, ".git"))
++    after
++      File.rm_rf(workspace_root)
++    end
++  end
++
++  test "existing workspace is not re-branched on reuse" do
++    test_root =
++      Path.join(
++        System.tmp_dir!(),
++        "symphony-elixir-reuse-branch-#{System.unique_integer([:positive])}"
++      )
++
++    try do
++      template_repo = Path.join(test_root, "source")
++      workspace_root = Path.join(test_root, "workspaces")
++
++      File.mkdir_p!(template_repo)
++      File.write!(Path.join(template_repo, "README.md"), "repo\n")
++      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
++      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
++      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
++      System.cmd("git", ["-C", template_repo, "add", "README.md"])
++      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
++
++      write_workflow_file!(Workflow.workflow_file_path(),
++        workspace_root: workspace_root,
++        hook_after_create: "git clone --depth 1 #{template_repo} ."
++      )
++
++      assert {:ok, workspace} = Workspace.create_for_issue("S-77")
++      {branch1, 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
++      assert String.trim(branch1) == "opal/S-77"
++
++      System.cmd("git", ["-C", workspace, "config", "user.name", "Test User"])
++      System.cmd("git", ["-C", workspace, "config", "user.email", "test@example.com"])
++      File.write!(Path.join(workspace, "change.txt"), "change\n")
++      System.cmd("git", ["-C", workspace, "add", "change.txt"])
++      System.cmd("git", ["-C", workspace, "commit", "-m", "a commit on the branch"])
++
++      assert {:ok, ^workspace} = Workspace.create_for_issue("S-77")
++
++      {branch2, 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
++      assert String.trim(branch2) == "opal/S-77"
++      assert File.exists?(Path.join(workspace, "change.txt"))
++    after
++      File.rm_rf(test_root)
++    end
++  end
+ end

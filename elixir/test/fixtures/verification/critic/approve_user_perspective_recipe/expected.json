@@ -1,0 +1,5 @@
+{
+  "verdict": "approve",
+  "reason_contains": "branch",
+  "missing_coverage_contains": ""
+}

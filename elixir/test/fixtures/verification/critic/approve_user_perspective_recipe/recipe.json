@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "name": "compile",
+      "run": "mix compile --warnings-as-errors",
+      "expect_exit": 0
+    },
+    {
+      "name": "exercise create_for_issue on a throwaway clone",
+      "run": "bash -lc 'set -euo pipefail; TMP=$(mktemp -d); git -C \"$TMP\" init --initial-branch=main -q && git -C \"$TMP\" commit --allow-empty -m seed -q; mix run -e \"{:ok, path} = SymphonyElixir.Workspace.create_for_issue(%{number: 4242}, clone_path: \\\"$TMP\\\"); IO.puts(path)\" > /tmp/wsout; WORKSPACE=$(tail -n1 /tmp/wsout); BRANCH=$(git -C \"$WORKSPACE\" branch --show-current); test \"$BRANCH\" = \"opal/4242\"'",
+      "expect_exit": 0
+    }
+  ]
+}

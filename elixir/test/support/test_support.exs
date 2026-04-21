@@ -140,6 +140,9 @@ defmodule SymphonyElixir.TestSupport do
           verification_enabled: nil,
           verification_required: nil,
           verification_step_timeout_ms: nil,
+          verification_critic_enabled: nil,
+          verification_critic_timeout_ms: nil,
+          verification_critic_max_rejections: nil,
           prompt: @workflow_prompt
         ],
         overrides
@@ -193,6 +196,9 @@ defmodule SymphonyElixir.TestSupport do
     verification_enabled = Keyword.get(config, :verification_enabled)
     verification_required = Keyword.get(config, :verification_required)
     verification_step_timeout_ms = Keyword.get(config, :verification_step_timeout_ms)
+    verification_critic_enabled = Keyword.get(config, :verification_critic_enabled)
+    verification_critic_timeout_ms = Keyword.get(config, :verification_critic_timeout_ms)
+    verification_critic_max_rejections = Keyword.get(config, :verification_critic_max_rejections)
     prompt = Keyword.get(config, :prompt)
 
     sections =
@@ -240,7 +246,14 @@ defmodule SymphonyElixir.TestSupport do
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
         knowledge_yaml(knowledge_backend, knowledge_root),
-        verification_yaml(verification_enabled, verification_required, verification_step_timeout_ms),
+        verification_yaml(
+          verification_enabled,
+          verification_required,
+          verification_step_timeout_ms,
+          verification_critic_enabled,
+          verification_critic_timeout_ms,
+          verification_critic_max_rejections
+        ),
         "---",
         prompt
       ]
@@ -335,14 +348,24 @@ defmodule SymphonyElixir.TestSupport do
     |> Enum.join("\n")
   end
 
-  defp verification_yaml(nil, nil, nil), do: nil
+  defp verification_yaml(nil, nil, nil, nil, nil, nil), do: nil
 
-  defp verification_yaml(enabled, required, step_timeout_ms) do
+  defp verification_yaml(
+         enabled,
+         required,
+         step_timeout_ms,
+         critic_enabled,
+         critic_timeout_ms,
+         critic_max_rejections
+       ) do
     [
       "verification:",
       !is_nil(enabled) && "  enabled: #{yaml_value(enabled)}",
       !is_nil(required) && "  required: #{yaml_value(required)}",
-      !is_nil(step_timeout_ms) && "  step_timeout_ms: #{yaml_value(step_timeout_ms)}"
+      !is_nil(step_timeout_ms) && "  step_timeout_ms: #{yaml_value(step_timeout_ms)}",
+      !is_nil(critic_enabled) && "  critic_enabled: #{yaml_value(critic_enabled)}",
+      !is_nil(critic_timeout_ms) && "  critic_timeout_ms: #{yaml_value(critic_timeout_ms)}",
+      !is_nil(critic_max_rejections) && "  critic_max_rejections: #{yaml_value(critic_max_rejections)}"
     ]
     |> Enum.reject(&(&1 in [nil, false]))
     |> Enum.join("\n")
