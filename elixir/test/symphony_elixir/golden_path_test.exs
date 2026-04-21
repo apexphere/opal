@@ -19,7 +19,13 @@ defmodule SymphonyElixir.GoldenPathTest do
     @spec run_turn(Path.t(), String.t(), Issue.t(), keyword()) :: {:ok, map()}
     def run_turn(workspace, prompt, %Issue{} = issue, opts) do
       recipient = Application.fetch_env!(:symphony_elixir, :golden_path_test_recipient)
-      send(recipient, {:fake_claude_turn, workspace, prompt})
+      send(recipient, {:fake_claude_turn, self(), workspace, prompt})
+
+      receive do
+        :continue_fake_claude -> :ok
+      after
+        5_000 -> raise "fake Claude runner was not released by the test"
+      end
 
       write_verification_recipe!(workspace, issue.identifier)
       mark_issue_closed!(issue)
@@ -51,21 +57,40 @@ defmodule SymphonyElixir.GoldenPathTest do
 
     defp write_verification_recipe!(workspace, identifier) do
       File.mkdir_p!(Path.join(workspace, ".opal"))
+      recipe_mode = Application.get_env(:symphony_elixir, :golden_path_test_recipe_mode, :pass)
 
       File.write!(
         Path.join(workspace, ".opal/verify.json"),
         Jason.encode!(%{
           "version" => "1",
           "description" => "golden path workspace proof",
-          "steps" => [
-            %{
-              "name" => "workspace has cloned repo and issue branch",
-              "shell" => "test -f README.md && test \"$(git branch --show-current)\" = \"opal/#{identifier}\"",
-              "expect_exit" => 0
-            }
-          ]
+          "steps" => recipe_steps(recipe_mode, identifier)
         })
       )
+    end
+
+    defp recipe_steps(:fail, _identifier) do
+      [
+        %{
+          "name" => "deliberate verification failure",
+          "shell" => "printf 'golden path failure\\n'; exit 42",
+          "expect_exit" => 0
+        }
+      ]
+    end
+
+    defp recipe_steps(:pass, identifier) do
+      [
+        %{
+          "name" => "workspace has cloned repo and issue branch",
+          "shell" => "test -f README.md && test \"$(git branch --show-current)\" = \"opal/#{identifier}\"",
+          "expect_exit" => 0
+        }
+      ]
+    end
+
+    defp recipe_steps(mode, _identifier) do
+      raise ArgumentError, "unknown golden path recipe mode: #{inspect(mode)}"
     end
 
     defp mark_issue_closed!(%Issue{} = issue) do
@@ -83,11 +108,13 @@ defmodule SymphonyElixir.GoldenPathTest do
     previous_memory_issues = Application.get_env(:symphony_elixir, :memory_tracker_issues)
     previous_memory_recipient = Application.get_env(:symphony_elixir, :memory_tracker_recipient)
     previous_curator_flag = Application.get_env(:symphony_elixir, :curator_auto_learn_from_failures)
+    previous_recipe_mode = Application.get_env(:symphony_elixir, :golden_path_test_recipe_mode)
 
     Application.put_env(:symphony_elixir, :claude_code_runner_module, FakeClaudeRunner)
     Application.put_env(:symphony_elixir, :golden_path_test_recipient, self())
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
     Application.put_env(:symphony_elixir, :curator_auto_learn_from_failures, false)
+    Application.put_env(:symphony_elixir, :golden_path_test_recipe_mode, :pass)
 
     on_exit(fn ->
       restore_app_env(:claude_code_runner_module, previous_runner)
@@ -95,6 +122,7 @@ defmodule SymphonyElixir.GoldenPathTest do
       restore_app_env(:memory_tracker_issues, previous_memory_issues)
       restore_app_env(:memory_tracker_recipient, previous_memory_recipient)
       restore_app_env(:curator_auto_learn_from_failures, previous_curator_flag)
+      restore_app_env(:golden_path_test_recipe_mode, previous_recipe_mode)
     end)
 
     :ok
@@ -139,9 +167,11 @@ defmodule SymphonyElixir.GoldenPathTest do
 
       Orchestrator.request_refresh(orchestrator_name)
 
-      assert_receive {:fake_claude_turn, workspace, prompt}, 2_000
+      assert_receive {:fake_claude_turn, fake_runner_pid, workspace, prompt}, 2_000
       assert Path.basename(workspace) == issue.identifier
       assert prompt =~ "Verification step (required before declaring done)"
+      assert :ok = wait_until(fn -> running_workspace_path(pid, issue.id) == workspace end)
+      send(fake_runner_pid, :continue_fake_claude)
 
       assert_receive {:memory_tracker_state_update, "issue-golden-1", "Closed"}, 1_000
 
@@ -175,6 +205,96 @@ defmodule SymphonyElixir.GoldenPathTest do
     end
   end
 
+  test "failing required verification preserves workspace and schedules retry" do
+    test_root = fresh_root()
+    source_repo = Path.join(test_root, "source")
+    workspace_root = Path.join(test_root, "workspaces")
+
+    try do
+      create_source_repo!(source_repo)
+      File.mkdir_p!(workspace_root)
+
+      issue =
+        golden_issue(
+          id: "issue-golden-fail",
+          identifier: "OPAL-53",
+          url: "https://github.com/apexphere/opal/issues/53"
+        )
+
+      Application.put_env(:symphony_elixir, :golden_path_test_recipe_mode, :fail)
+      Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        tracker_active_states: ["Todo", "In Progress"],
+        tracker_terminal_states: ["Closed"],
+        workspace_root: workspace_root,
+        hook_after_create: "git clone --depth 1 #{source_repo} .",
+        agent_runtime: "claude-code",
+        max_concurrent_agents: 1,
+        max_turns: 1,
+        verification_enabled: true,
+        verification_required: true,
+        verification_step_timeout_ms: 5_000
+      )
+
+      orchestrator_name = Module.concat(__MODULE__, :GoldenPathFailureOrchestrator)
+      {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+      on_exit(fn ->
+        if Process.alive?(pid), do: Process.exit(pid, :normal)
+      end)
+
+      Orchestrator.request_refresh(orchestrator_name)
+
+      assert_receive {:fake_claude_turn, fake_runner_pid, workspace, prompt}, 2_000
+      assert Path.basename(workspace) == issue.identifier
+      assert prompt =~ "Verification step (required before declaring done)"
+      assert :ok = wait_until(fn -> running_workspace_path(pid, issue.id) == workspace end)
+      send(fake_runner_pid, :continue_fake_claude)
+
+      assert_receive {:memory_tracker_state_update, "issue-golden-fail", "Closed"}, 1_000
+      assert_receive {:memory_tracker_state_update, "issue-golden-fail", "In Progress"}, 3_000
+
+      assert {:ok, %{retry_entry: retry_entry, state: state}} =
+               wait_until_value(fn ->
+                 state = :sys.get_state(pid)
+                 retry_entry = state.retry_attempts[issue.id]
+
+                 if not Map.has_key?(state.running, issue.id) and
+                      not Map.has_key?(state.verifying, issue.id) and retry_entry do
+                   %{retry_entry: retry_entry, state: state}
+                 end
+               end)
+
+      assert File.exists?(workspace)
+      assert MapSet.member?(state.claimed, issue.id)
+      assert MapSet.member?(state.completed, issue.id)
+
+      assert %{
+               attempt: 1,
+               identifier: "OPAL-53",
+               workspace_path: ^workspace
+             } = retry_entry
+
+      verify_log = workspace |> Path.join(".opal/verify-log.json") |> File.read!() |> Jason.decode!()
+      assert verify_log["status"] == "fail"
+
+      assert [
+               %{
+                 "name" => "deliberate verification failure",
+                 "passed" => false,
+                 "exit" => 42,
+                 "output" => output
+               }
+             ] = verify_log["steps"]
+
+      assert output =~ "golden path failure"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)
   defp restore_app_env(key, value), do: Application.put_env(:symphony_elixir, key, value)
 
@@ -182,14 +302,14 @@ defmodule SymphonyElixir.GoldenPathTest do
     Path.join(System.tmp_dir!(), "opal-golden-path-#{System.unique_integer([:positive])}")
   end
 
-  defp golden_issue do
+  defp golden_issue(overrides \\ []) do
     %Issue{
-      id: "issue-golden-1",
-      identifier: "OPAL-47",
+      id: Keyword.get(overrides, :id, "issue-golden-1"),
+      identifier: Keyword.get(overrides, :identifier, "OPAL-47"),
       title: "Exercise the golden path",
       description: "Prove the default flow with local fakes.",
       state: "Todo",
-      url: "https://github.com/apexphere/opal/issues/47",
+      url: Keyword.get(overrides, :url, "https://github.com/apexphere/opal/issues/47"),
       labels: ["todo"],
       created_at: ~U[2026-04-21 00:00:00Z]
     }
@@ -225,6 +345,13 @@ defmodule SymphonyElixir.GoldenPathTest do
     "'" <> String.replace(path, "'", "'\"'\"'") <> "'"
   end
 
+  defp running_workspace_path(pid, issue_id) do
+    pid
+    |> :sys.get_state()
+    |> Map.get(:running, %{})
+    |> get_in([issue_id, :workspace_path])
+  end
+
   defp wait_until(fun, attempts \\ 200, delay_ms \\ 25)
   defp wait_until(_fun, 0, _delay_ms), do: :timeout
 
@@ -234,6 +361,24 @@ defmodule SymphonyElixir.GoldenPathTest do
     else
       Process.sleep(delay_ms)
       wait_until(fun, attempts - 1, delay_ms)
+    end
+  end
+
+  defp wait_until_value(fun, attempts \\ 200, delay_ms \\ 25)
+  defp wait_until_value(_fun, 0, _delay_ms), do: :timeout
+
+  defp wait_until_value(fun, attempts, delay_ms) do
+    case fun.() do
+      nil ->
+        Process.sleep(delay_ms)
+        wait_until_value(fun, attempts - 1, delay_ms)
+
+      false ->
+        Process.sleep(delay_ms)
+        wait_until_value(fun, attempts - 1, delay_ms)
+
+      value ->
+        {:ok, value}
     end
   end
 end
