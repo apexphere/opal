@@ -237,7 +237,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                     </td>
                     <td><%= entry.attempt %></td>
                     <td class="mono"><%= entry.due_at || "n/a" %></td>
-                    <td><%= entry.error || "n/a" %></td>
+                    <td><%= retry_error_text(entry.error) %></td>
                   </tr>
                 </tbody>
               </table>
@@ -308,6 +308,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   defp format_int(_value), do: "n/a"
+
+  defp retry_error_text(%{message: message}) when is_binary(message), do: message
+  defp retry_error_text(%{"message" => message}) when is_binary(message), do: message
+  defp retry_error_text(error) when is_binary(error) and error != "", do: error
+  defp retry_error_text(_error), do: "n/a"
 
   defp state_badge_class(state) do
     base = "state-badge"

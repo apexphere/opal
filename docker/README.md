@@ -69,6 +69,17 @@ project-adaptive prompt. That prompt tells the agent to read your project's
 `CLAUDE.md` / `AGENTS.md` / `README.md` / `CONTRIBUTING.md` and follow them as
 authoritative.
 
+Because the default recipe critic invokes `codex exec`, mount an authenticated
+Codex config into the container, for example `-v "$HOME/.codex":/root/.codex:ro`.
+If you do not want to provide Codex auth yet, set
+`verification.critic_enabled: false` in your project `WORKFLOW.md`; verification
+still runs, but recipe-quality criticism is skipped.
+
+Docker uses a 10-minute `verification.step_timeout_ms` so real project
+integration checks have room to boot services and exercise the delivered
+surface. Lower it in `WORKFLOW.md` if a broken verification step should fail
+faster for your project.
+
 In other words: a project with no Opal-specific config gets sensible defaults.
 A project that wants to customize anything just drops a `WORKFLOW.md` at its
 root.
@@ -103,6 +114,7 @@ Common overrides:
 - `verification.enabled`, `verification.required`, and `verification.critic_enabled` can be set to
   `false` for a project that needs to temporarily opt out of the default self-verification gate or
   recipe critic.
+- `verification.step_timeout_ms` controls the per-step timeout for verification commands.
 
 ## Image contents
 

@@ -277,7 +277,11 @@ defmodule SymphonyElixir.GoldenPathTest do
       assert %{
                attempt: 1,
                identifier: "OPAL-53",
-               error: "verification failed: deliberate verification failure exited 42 (expected 0)",
+               error: %{
+                 code: :verification_failed,
+                 message: "verification failed: deliberate verification failure exited 42 (expected 0)",
+                 detail: %{step: "deliberate verification failure", exit: 42, expect_exit: 0}
+               },
                workspace_path: ^workspace
              } = retry_entry
 
@@ -383,7 +387,11 @@ defmodule SymphonyElixir.GoldenPathTest do
       assert %{
                attempt: 1,
                identifier: "OPAL-48",
-               error: "verification failed: no_recipe",
+               error: %{
+                 code: :no_recipe,
+                 message: "verification failed: no_recipe",
+                 detail: %{reason: :no_recipe}
+               },
                workspace_path: ^workspace
              } = retry_entry
 
