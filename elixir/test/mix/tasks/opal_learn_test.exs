@@ -4,6 +4,7 @@ defmodule Mix.Tasks.Opal.LearnTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Opal.Learn
+  alias SymphonyElixir.Curator.Proposal
 
   setup do
     Mix.Task.reenable("opal.learn")
@@ -166,7 +167,7 @@ defmodule Mix.Tasks.Opal.LearnTest do
       {:fn,
        fn input, _summaries, _candidates ->
          send(test_pid, {:saw_input, input})
-         {:ok, SymphonyElixir.Curator.Proposal.reject("noop")}
+         {:ok, Proposal.reject("noop")}
        end}
     )
 
@@ -202,7 +203,7 @@ defmodule Mix.Tasks.Opal.LearnTest do
       {:fn,
        fn input, _summaries, _candidates ->
          send(test_pid, {:saw_input, input})
-         {:ok, SymphonyElixir.Curator.Proposal.reject("noop")}
+         {:ok, Proposal.reject("noop")}
        end}
     )
 
