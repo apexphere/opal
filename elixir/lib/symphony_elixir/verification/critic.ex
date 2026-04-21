@@ -15,10 +15,17 @@ defmodule SymphonyElixir.Verification.Critic do
   Fail-open is a caller policy: when `codex` is missing from PATH the
   critic returns `{:error, {:codex_command_not_found, cmd}}` and lets the
   caller decide whether to proceed.
+
+  Codex quota exhaustion is detected on stdout and falls through to a
+  Claude Code-backed critic (`claude -p`) via
+  `SymphonyElixir.Critic.Fallback.run_with_cc_fallback/2`. The fallback
+  shares a model family with the typical agent producer — a weaker but
+  non-zero signal beats a silent fail-open when Codex is unavailable (#62).
   """
 
   require Logger
 
+  alias SymphonyElixir.Critic.Fallback
   alias SymphonyElixir.Verification.CriticSchema
 
   @default_timeout_ms 180_000
@@ -31,16 +38,39 @@ defmodule SymphonyElixir.Verification.Critic do
   def critique(task_summary, diff_text, recipe_json, opts \\ [])
       when is_binary(task_summary) and is_binary(diff_text) and is_binary(recipe_json) and
              is_list(opts) do
-    prompt = build_prompt(task_summary, diff_text, recipe_json)
+    codex_prompt = build_prompt(task_summary, diff_text, recipe_json)
+    claude_prompt = build_fenced_prompt(task_summary, diff_text, recipe_json)
 
-    case run_codex(command(), prompt) do
+    result =
+      Fallback.run_with_cc_fallback(
+        fn -> run_codex(command(), codex_prompt) end,
+        fn -> run_claude(claude_command(), claude_prompt) end
+      )
+
+    case result do
       {:ok, raw_output} ->
         parse_output(raw_output)
 
       {:error, reason} ->
-        Logger.warning("Verification critic codex exec failed: #{inspect(reason)}")
+        Logger.warning("Verification critic failed: #{inspect(reason)}")
         {:error, reason}
     end
+  end
+
+  @doc false
+  @spec build_fenced_prompt(String.t(), String.t(), String.t()) :: String.t()
+  def build_fenced_prompt(task_summary, diff_text, recipe_json) do
+    base = build_prompt(task_summary, diff_text, recipe_json)
+
+    """
+    #{base}
+
+    Respond with EXACTLY one fenced JSON block, no commentary outside it:
+
+    ```json
+    {"verdict": "approve|reject", "reason": "...", "missing_coverage": "..."}
+    ```
+    """
   end
 
   @doc false
@@ -122,8 +152,38 @@ defmodule SymphonyElixir.Verification.Critic do
     ]
 
     case System.cmd(executable, args, stderr_to_stdout: true) do
-      {_stdout, 0} -> read_output(out_path)
-      {output, status} -> {:error, {:codex_exit, status, output}}
+      {stdout, 0} ->
+        if Fallback.quota_exhausted?(stdout) do
+          Logger.info("Verification critic codex exec hit usage limit")
+          {:error, :rate_limited}
+        else
+          read_output(out_path)
+        end
+
+      {output, status} ->
+        {:error, {:codex_exit, status, output}}
+    end
+  end
+
+  defp run_claude(cmd, prompt) do
+    case System.find_executable(cmd) do
+      nil ->
+        {:error, {:claude_command_not_found, cmd}}
+
+      executable ->
+        args = ["-p", "--output-format", "text", "--", prompt]
+
+        case System.cmd(executable, args, stderr_to_stdout: true) do
+          {output, 0} -> extract_fenced_json(output)
+          {output, status} -> {:error, {:claude_exit, status, output}}
+        end
+    end
+  end
+
+  defp extract_fenced_json(raw) do
+    case Regex.run(~r/```json\s*\n([\s\S]*?)\s*```/, raw, capture: :all_but_first) do
+      [json] -> {:ok, json}
+      _ -> {:error, {:claude_output_missing_fence, raw}}
     end
   end
 
@@ -152,6 +212,13 @@ defmodule SymphonyElixir.Verification.Critic do
   defp command do
     case Application.get_env(:symphony_elixir, :verify_critic_codex_command) do
       nil -> "codex"
+      cmd when is_binary(cmd) -> cmd
+    end
+  end
+
+  defp claude_command do
+    case Application.get_env(:symphony_elixir, :verify_critic_claude_command) do
+      nil -> "claude"
       cmd when is_binary(cmd) -> cmd
     end
   end

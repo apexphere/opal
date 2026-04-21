@@ -163,7 +163,7 @@ defmodule SymphonyElixir.Verification.CriticTest do
             assert status != 0
           end)
 
-        assert log =~ "codex exec failed"
+        assert log =~ "Verification critic failed"
       after
         Application.delete_env(:symphony_elixir, :verify_critic_codex_command)
         File.rm(stub)
@@ -180,6 +180,83 @@ defmodule SymphonyElixir.Verification.CriticTest do
       after
         Application.delete_env(:symphony_elixir, :verify_critic_codex_command)
         File.rm(stub)
+      end
+    end
+
+    test "falls through to the Claude Code critic when Codex stdout signals quota exhaustion" do
+      codex_stub = write_rate_limited_stub!()
+
+      claude_stub =
+        write_claude_stub!("""
+        thinking...
+
+        ```json
+        {"verdict":"reject","reason":"cc-critic ran","missing_coverage":"cc-gap"}
+        ```
+
+        done
+        """)
+
+      Application.put_env(:symphony_elixir, :verify_critic_codex_command, codex_stub)
+      Application.put_env(:symphony_elixir, :verify_critic_claude_command, claude_stub)
+
+      try do
+        log =
+          capture_log(fn ->
+            assert {:ok, {:reject, %{reason: "cc-critic ran", missing_coverage: "cc-gap"}}} =
+                     Critic.critique(@task, @diff, @recipe)
+          end)
+
+        assert log =~ "usage limit"
+        assert log =~ "falling back to Claude Code"
+      after
+        Application.delete_env(:symphony_elixir, :verify_critic_codex_command)
+        Application.delete_env(:symphony_elixir, :verify_critic_claude_command)
+        File.rm(codex_stub)
+        File.rm(claude_stub)
+      end
+    end
+
+    test "accepts a Claude response whose closing fence has no trailing newline" do
+      codex_stub = write_rate_limited_stub!()
+
+      # No newline between the JSON payload and the closing ``` — a shape
+      # models routinely emit when the response ends exactly at the fence.
+      claude_stub =
+        write_claude_stub!(~s(```json\n{"verdict":"approve","reason":"fenced tight","missing_coverage":""}```))
+
+      Application.put_env(:symphony_elixir, :verify_critic_codex_command, codex_stub)
+      Application.put_env(:symphony_elixir, :verify_critic_claude_command, claude_stub)
+
+      try do
+        capture_log(fn ->
+          assert {:ok, :approve} = Critic.critique(@task, @diff, @recipe)
+        end)
+      after
+        Application.delete_env(:symphony_elixir, :verify_critic_codex_command)
+        Application.delete_env(:symphony_elixir, :verify_critic_claude_command)
+        File.rm(codex_stub)
+        File.rm(claude_stub)
+      end
+    end
+
+    test "surfaces a Claude fallback failure when its stdout has no fenced JSON" do
+      codex_stub = write_rate_limited_stub!()
+      claude_stub = write_claude_stub!("no fence here\n")
+
+      Application.put_env(:symphony_elixir, :verify_critic_codex_command, codex_stub)
+      Application.put_env(:symphony_elixir, :verify_critic_claude_command, claude_stub)
+
+      try do
+        capture_log(fn ->
+          assert {:error, {:claude_output_missing_fence, _}} =
+                   Critic.critique(@task, @diff, @recipe)
+        end)
+      after
+        Application.delete_env(:symphony_elixir, :verify_critic_codex_command)
+        Application.delete_env(:symphony_elixir, :verify_critic_claude_command)
+        File.rm(codex_stub)
+        File.rm(claude_stub)
       end
     end
   end
@@ -262,6 +339,45 @@ defmodule SymphonyElixir.Verification.CriticTest do
     #!/usr/bin/env bash
     echo "boom" >&2
     exit 7
+    """)
+
+    File.chmod!(stub_path, 0o755)
+    stub_path
+  end
+
+  defp write_rate_limited_stub! do
+    stub_path =
+      Path.join(
+        System.tmp_dir!(),
+        "verify-critic-stub-ratelimit-#{System.unique_integer([:positive])}.sh"
+      )
+
+    File.write!(stub_path, """
+    #!/usr/bin/env bash
+    cat <<'__OPAL_QUOTA__'
+    OpenAI Codex v0.113.0
+    ERROR: You've hit your usage limit. Upgrade to Pro, visit the settings page to purchase more credits or try again later.
+    __OPAL_QUOTA__
+    exit 0
+    """)
+
+    File.chmod!(stub_path, 0o755)
+    stub_path
+  end
+
+  defp write_claude_stub!(stdout) do
+    stub_path =
+      Path.join(
+        System.tmp_dir!(),
+        "verify-critic-claude-stub-#{System.unique_integer([:positive])}.sh"
+      )
+
+    File.write!(stub_path, """
+    #!/usr/bin/env bash
+    cat <<'__OPAL_CLAUDE__'
+    #{stdout}
+    __OPAL_CLAUDE__
+    exit 0
     """)
 
     File.chmod!(stub_path, 0o755)
