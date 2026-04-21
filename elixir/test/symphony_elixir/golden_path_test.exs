@@ -56,17 +56,20 @@ defmodule SymphonyElixir.GoldenPathTest do
     end
 
     defp write_verification_recipe!(workspace, identifier) do
-      File.mkdir_p!(Path.join(workspace, ".opal"))
       recipe_mode = Application.get_env(:symphony_elixir, :golden_path_test_recipe_mode, :pass)
 
-      File.write!(
-        Path.join(workspace, ".opal/verify.json"),
-        Jason.encode!(%{
-          "version" => "1",
-          "description" => "golden path workspace proof",
-          "steps" => recipe_steps(recipe_mode, identifier)
-        })
-      )
+      if recipe_mode != :missing do
+        File.mkdir_p!(Path.join(workspace, ".opal"))
+
+        File.write!(
+          Path.join(workspace, ".opal/verify.json"),
+          Jason.encode!(%{
+            "version" => "1",
+            "description" => "golden path workspace proof",
+            "steps" => recipe_steps(recipe_mode, identifier)
+          })
+        )
+      end
     end
 
     defp recipe_steps(:fail, _identifier) do
@@ -274,6 +277,11 @@ defmodule SymphonyElixir.GoldenPathTest do
       assert %{
                attempt: 1,
                identifier: "OPAL-53",
+               error: %{
+                 code: :verification_failed,
+                 message: "verification failed: deliberate verification failure exited 42 (expected 0)",
+                 detail: %{step: "deliberate verification failure", exit: 42, expect_exit: 0}
+               },
                workspace_path: ^workspace
              } = retry_entry
 
@@ -290,6 +298,107 @@ defmodule SymphonyElixir.GoldenPathTest do
              ] = verify_log["steps"]
 
       assert output =~ "golden path failure"
+
+      Application.put_env(:symphony_elixir, :golden_path_test_recipe_mode, :pass)
+      Application.put_env(:symphony_elixir, :memory_tracker_issues, [%Issue{issue | state: "In Progress"}])
+
+      assert_receive {:fake_claude_turn, retry_runner_pid, ^workspace, retry_prompt}, 2_000
+      assert retry_prompt =~ "Previous verification failed"
+      assert retry_prompt =~ "golden path failure"
+      send(retry_runner_pid, :continue_fake_claude)
+
+      assert_receive {:memory_tracker_state_update, "issue-golden-fail", "Closed"}, 1_000
+
+      assert :ok =
+               wait_until(fn ->
+                 not File.exists?(workspace)
+               end)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "missing required verification recipe fails handoff and schedules retry" do
+    test_root = fresh_root()
+    source_repo = Path.join(test_root, "source")
+    workspace_root = Path.join(test_root, "workspaces")
+
+    try do
+      create_source_repo!(source_repo)
+      File.mkdir_p!(workspace_root)
+
+      issue =
+        golden_issue(
+          id: "issue-golden-missing-recipe",
+          identifier: "OPAL-48",
+          url: "https://github.com/apexphere/opal/issues/48"
+        )
+
+      Application.put_env(:symphony_elixir, :golden_path_test_recipe_mode, :missing)
+      Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        tracker_active_states: ["Todo", "In Progress"],
+        tracker_terminal_states: ["Closed"],
+        workspace_root: workspace_root,
+        hook_after_create: "git clone --depth 1 #{source_repo} .",
+        agent_runtime: "claude-code",
+        max_concurrent_agents: 1,
+        max_turns: 1,
+        verification_enabled: true,
+        verification_required: true,
+        verification_step_timeout_ms: 5_000
+      )
+
+      orchestrator_name = Module.concat(__MODULE__, :GoldenPathMissingRecipeOrchestrator)
+      {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+      on_exit(fn ->
+        if Process.alive?(pid), do: Process.exit(pid, :normal)
+      end)
+
+      Orchestrator.request_refresh(orchestrator_name)
+
+      assert_receive {:fake_claude_turn, fake_runner_pid, workspace, prompt}, 2_000
+      assert Path.basename(workspace) == issue.identifier
+      assert prompt =~ "Verification step (required before declaring done)"
+      assert :ok = wait_until(fn -> running_workspace_path(pid, issue.id) == workspace end)
+      send(fake_runner_pid, :continue_fake_claude)
+
+      assert_receive {:memory_tracker_state_update, "issue-golden-missing-recipe", "Closed"}, 1_000
+      assert_receive {:memory_tracker_state_update, "issue-golden-missing-recipe", "In Progress"}, 3_000
+
+      assert {:ok, %{retry_entry: retry_entry, state: state}} =
+               wait_until_value(fn ->
+                 state = :sys.get_state(pid)
+                 retry_entry = state.retry_attempts[issue.id]
+
+                 if not Map.has_key?(state.running, issue.id) and
+                      not Map.has_key?(state.verifying, issue.id) and retry_entry do
+                   %{retry_entry: retry_entry, state: state}
+                 end
+               end)
+
+      assert File.exists?(workspace)
+      assert MapSet.member?(state.claimed, issue.id)
+      assert MapSet.member?(state.completed, issue.id)
+
+      assert %{
+               attempt: 1,
+               identifier: "OPAL-48",
+               error: %{
+                 code: :no_recipe,
+                 message: "verification failed: no_recipe",
+                 detail: %{reason: :no_recipe}
+               },
+               workspace_path: ^workspace
+             } = retry_entry
+
+      verify_log = workspace |> Path.join(".opal/verify-log.json") |> File.read!() |> Jason.decode!()
+      assert verify_log["status"] == "fail"
+      assert verify_log["skipped_reason"] == "no_recipe"
+      assert verify_log["steps"] == []
     after
       File.rm_rf(test_root)
     end

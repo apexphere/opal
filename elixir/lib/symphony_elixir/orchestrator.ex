@@ -859,7 +859,7 @@ defmodule SymphonyElixir.Orchestrator do
 
     timer_ref = Process.send_after(self(), {:retry_issue, issue_id, retry_token}, delay_ms)
 
-    error_suffix = if is_binary(error), do: " error=#{error}", else: ""
+    error_suffix = retry_error_log_suffix(error)
 
     Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
 
@@ -1071,6 +1071,7 @@ defmodule SymphonyElixir.Orchestrator do
       |> schedule_issue_retry(issue_id, 1, %{
         identifier: Map.get(entry, :identifier),
         delay_type: :continuation,
+        error: verification_retry_error(outcome),
         worker_host: Map.get(entry, :worker_host),
         workspace_path: Map.get(entry, :workspace_path)
       })
@@ -1086,6 +1087,7 @@ defmodule SymphonyElixir.Orchestrator do
     |> schedule_issue_retry(issue_id, 1, %{
       identifier: Map.get(entry, :identifier),
       delay_type: :continuation,
+      error: verification_retry_error(outcome),
       worker_host: Map.get(entry, :worker_host),
       workspace_path: Map.get(entry, :workspace_path)
     })
@@ -1105,6 +1107,56 @@ defmodule SymphonyElixir.Orchestrator do
         completed: MapSet.put(state.completed, issue_id)
     }
   end
+
+  defp verification_retry_error(%{status: :rejected, rejection: %{reason: reason, missing_coverage: missing}})
+       when is_binary(reason) and reason != "" do
+    %{
+      code: :verification_rejected,
+      message: "verification rejected: #{reason}",
+      detail: %{reason: reason, missing_coverage: missing}
+    }
+  end
+
+  defp verification_retry_error(%{status: :rejected}) do
+    %{code: :verification_rejected, message: "verification rejected"}
+  end
+
+  defp verification_retry_error(%{skipped_reason: reason}) when not is_nil(reason) do
+    message = "verification failed: #{format_verification_reason(reason)}"
+    code = if reason == :no_recipe, do: :no_recipe, else: :verification_failed
+
+    %{code: code, message: message, detail: %{reason: reason}}
+  end
+
+  defp verification_retry_error(%{steps: steps}) when is_list(steps) do
+    case Enum.find(steps, &(Map.get(&1, :passed) == false)) do
+      %{name: name, exit: exit, expect_exit: expect_exit} ->
+        %{
+          code: :verification_failed,
+          message: "verification failed: #{name} exited #{format_verification_exit(exit)} (expected #{expect_exit})",
+          detail: %{step: name, exit: exit, expect_exit: expect_exit}
+        }
+
+      _ ->
+        %{code: :verification_failed, message: "verification failed"}
+    end
+  end
+
+  defp verification_retry_error(_outcome), do: %{code: :verification_failed, message: "verification failed"}
+
+  defp format_verification_exit(:timeout), do: "timeout"
+  defp format_verification_exit(exit), do: to_string(exit)
+
+  defp format_verification_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp format_verification_reason(reason), do: inspect(reason)
+
+  defp retry_error_log_suffix(nil), do: ""
+  defp retry_error_log_suffix(error), do: " error=#{retry_error_message(error)}"
+
+  defp retry_error_message(%{message: message}) when is_binary(message), do: message
+  defp retry_error_message(%{"message" => message}) when is_binary(message), do: message
+  defp retry_error_message(error) when is_binary(error), do: error
+  defp retry_error_message(error), do: inspect(error)
 
   defp bump_critic_rejection_attempts(%State{} = state, issue_id, count) do
     %{state | critic_rejection_attempts: Map.put(state.critic_rejection_attempts, issue_id, count)}

@@ -681,6 +681,20 @@ defmodule SymphonyElixir.StatusDashboard do
   defp next_in_words(_), do: "n/a"
 
   defp format_retry_error(error) when is_binary(error) do
+    retry_error_suffix(error)
+  end
+
+  defp format_retry_error(%{message: message}) when is_binary(message) do
+    retry_error_suffix(message)
+  end
+
+  defp format_retry_error(%{"message" => message}) when is_binary(message) do
+    retry_error_suffix(message)
+  end
+
+  defp format_retry_error(_), do: ""
+
+  defp retry_error_suffix(error) do
     sanitized =
       error
       |> String.replace("\\r\\n", " ")
@@ -698,8 +712,6 @@ defmodule SymphonyElixir.StatusDashboard do
       " " <> colorize("error=#{truncate(sanitized, 96)}", @ansi_dim)
     end
   end
-
-  defp format_retry_error(_), do: ""
 
   defp format_runtime_seconds(seconds) when is_integer(seconds) do
     mins = div(seconds, 60)

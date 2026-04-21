@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       npm \
       openssh-client \
  && rm -rf /var/lib/apt/lists/* \
- && npm install -g @anthropic-ai/claude-code \
+ && npm install -g @anthropic-ai/claude-code @openai/codex \
  && npm cache clean --force
 
 COPY --from=build /app/bin/symphony /usr/local/bin/opal
