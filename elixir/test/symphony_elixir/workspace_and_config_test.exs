@@ -1326,6 +1326,30 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert message =~ "verification.step_timeout_ms"
   end
 
+  test "schema defaults verification critic to off with 180s timeout" do
+    assert {:ok, settings} = Schema.parse(%{})
+
+    assert settings.verification.critic_enabled == false
+    assert settings.verification.critic_timeout_ms == 180_000
+  end
+
+  test "schema parses verification critic fields" do
+    assert {:ok, settings} =
+             Schema.parse(%{
+               verification: %{critic_enabled: true, critic_timeout_ms: 30_000}
+             })
+
+    assert settings.verification.critic_enabled == true
+    assert settings.verification.critic_timeout_ms == 30_000
+  end
+
+  test "schema rejects non-positive verification critic_timeout_ms" do
+    assert {:error, {:invalid_workflow_config, message}} =
+             Schema.parse(%{verification: %{critic_timeout_ms: 0}})
+
+    assert message =~ "verification.critic_timeout_ms"
+  end
+
   test "schema parses workspace branch_pattern" do
     assert {:ok, settings} = Schema.parse(%{workspace: %{branch_pattern: "feat/{number}"}})
     assert settings.workspace.branch_pattern == "feat/{number}"

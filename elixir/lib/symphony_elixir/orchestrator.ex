@@ -1025,6 +1025,15 @@ defmodule SymphonyElixir.Orchestrator do
   defp apply_verification_outcome(state, issue_id, entry, status),
     do: apply_verification_outcome(state, issue_id, entry, status, nil)
 
+  # Critic-rejected recipes are treated as :fail for now. A follow-up commit
+  # (#42 commit 4) will thread the rejection reason + missing_coverage into
+  # the feedback loop so the next agent turn learns what was missing. For
+  # the moment this alias keeps the orchestrator pattern-match exhaustive
+  # and sends the issue back through the normal retry path.
+  defp apply_verification_outcome(%State{} = state, issue_id, entry, :rejected, outcome) do
+    apply_verification_outcome(state, issue_id, entry, :fail, outcome)
+  end
+
   defp apply_verification_outcome(%State{} = state, issue_id, entry, :fail, outcome) do
     revert_issue_state(issue_id)
     maybe_cast_failure_to_curator(issue_id, entry, outcome)

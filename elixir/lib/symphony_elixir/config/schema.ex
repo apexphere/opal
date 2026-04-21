@@ -331,13 +331,20 @@ defmodule SymphonyElixir.Config.Schema do
       field(:enabled, :boolean, default: false)
       field(:required, :boolean, default: false)
       field(:step_timeout_ms, :integer, default: 600_000)
+      field(:critic_enabled, :boolean, default: false)
+      field(:critic_timeout_ms, :integer, default: 180_000)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:enabled, :required, :step_timeout_ms], empty_values: [])
+      |> cast(
+        attrs,
+        [:enabled, :required, :step_timeout_ms, :critic_enabled, :critic_timeout_ms],
+        empty_values: []
+      )
       |> validate_number(:step_timeout_ms, greater_than: 0)
+      |> validate_number(:critic_timeout_ms, greater_than: 0)
     end
   end
 
