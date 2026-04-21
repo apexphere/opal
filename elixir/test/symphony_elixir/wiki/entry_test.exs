@@ -18,6 +18,12 @@ defmodule SymphonyElixir.Wiki.EntryTest do
       ref: docs/feeds/react-cleanup.md
       ingested_at: 2026-04-20T11:02:00Z
   related: [react-strictmode]
+  perfect_for:
+    - subscribing to external data sources
+    - timers tied to a component's lifetime
+  not_ideal_for:
+    - server-side rendering paths
+    - empty-dep-array effects that never re-fire
   ---
   # useEffect cleanup
 
@@ -36,6 +42,61 @@ defmodule SymphonyElixir.Wiki.EntryTest do
       assert entry.body =~ "# useEffect cleanup"
       assert [%{kind: "article", ref: "docs/feeds/react-cleanup.md"}] = entry.sources
       assert entry.related == ["react-strictmode"]
+      assert entry.perfect_for == ["subscribing to external data sources", "timers tied to a component's lifetime"]
+      assert entry.not_ideal_for == ["server-side rendering paths", "empty-dep-array effects that never re-fire"]
+    end
+
+    test "defaults perfect_for/not_ideal_for to [] when absent" do
+      raw = """
+      ---
+      slug: foo
+      title: t
+      created_at: 2026-04-20T00:00:00Z
+      updated_at: 2026-04-20T00:00:00Z
+      ---
+      body
+      """
+
+      assert {:ok, entry} = Entry.parse(raw)
+      assert entry.perfect_for == []
+      assert entry.not_ideal_for == []
+    end
+
+    test "tolerates non-list perfect_for / not_ideal_for" do
+      raw = """
+      ---
+      slug: foo
+      title: t
+      created_at: 2026-04-20T00:00:00Z
+      updated_at: 2026-04-20T00:00:00Z
+      perfect_for: "oops"
+      not_ideal_for: 42
+      ---
+      body
+      """
+
+      assert {:ok, entry} = Entry.parse(raw)
+      assert entry.perfect_for == []
+      assert entry.not_ideal_for == []
+    end
+
+    test "coerces non-string items in perfect_for" do
+      raw = """
+      ---
+      slug: foo
+      title: t
+      created_at: 2026-04-20T00:00:00Z
+      updated_at: 2026-04-20T00:00:00Z
+      perfect_for:
+        - 123
+        - ""
+        - "  trimmed  "
+      ---
+      body
+      """
+
+      assert {:ok, entry} = Entry.parse(raw)
+      assert entry.perfect_for == ["123", "trimmed"]
     end
 
     test "rejects missing frontmatter" do
@@ -215,6 +276,30 @@ defmodule SymphonyElixir.Wiki.EntryTest do
       raw = Entry.serialize(entry)
       assert raw =~ "sources: []"
       assert raw =~ "related: []"
+      assert raw =~ "perfect_for: []"
+      assert raw =~ "not_ideal_for: []"
+    end
+
+    test "serializes perfect_for / not_ideal_for as YAML lists" do
+      entry = %Entry{
+        slug: "x",
+        title: "y",
+        topic: "",
+        revision: 1,
+        created_at: "2026-04-20T00:00:00Z",
+        updated_at: "2026-04-20T00:00:00Z",
+        perfect_for: ["case a", "case b"],
+        not_ideal_for: ["anti a"],
+        body: "body\n"
+      }
+
+      raw = Entry.serialize(entry)
+      assert raw =~ "perfect_for:\n  - case a\n  - case b\n"
+      assert raw =~ "not_ideal_for:\n  - anti a\n"
+
+      assert {:ok, parsed} = Entry.parse(raw)
+      assert parsed.perfect_for == ["case a", "case b"]
+      assert parsed.not_ideal_for == ["anti a"]
     end
 
     test "escapes title containing colon" do
