@@ -9,12 +9,19 @@ defmodule Mix.Tasks.Opal.Learn do
       mix opal.learn path/to/article.md
       mix opal.learn path/to/article.md --project github_apexphere_opal
       mix opal.learn path/to/article.md --source-ref feeds/react.md
+      mix opal.learn path/to/article.md --project-description "Stock and crypto technical analysis"
 
   Options:
-    --project / -p   Project key (defaults to the configured tracker's project_key)
-    --source-ref     Source ref recorded on the entry (defaults to the article path)
-    --auto-accept    Skip the review prompt and write immediately on create/refine
-                     (intended for fixture evaluation, NOT for production use)
+    --project / -p         Project key (defaults to the configured tracker's project_key)
+    --project-description  Free-text domain context for the project (e.g.
+                           "Stock and crypto technical analysis"). Threaded
+                           into the distiller + critic prompts so the LLM
+                           judges relevance against the project domain
+                           rather than Opal-the-tool. Defaults to the
+                           `:curator_project_description` config value.
+    --source-ref           Source ref recorded on the entry (defaults to the article path)
+    --auto-accept          Skip the review prompt and write immediately on create/refine
+                           (intended for fixture evaluation, NOT for production use)
   """
 
   alias SymphonyElixir.Curator
@@ -25,7 +32,13 @@ defmodule Mix.Tasks.Opal.Learn do
   def run(args) do
     {opts, positional, invalid} =
       OptionParser.parse(args,
-        strict: [project: :string, source_ref: :string, help: :boolean, auto_accept: :boolean],
+        strict: [
+          project: :string,
+          project_description: :string,
+          source_ref: :string,
+          help: :boolean,
+          auto_accept: :boolean
+        ],
         aliases: [p: :project, h: :help]
       )
 
@@ -47,9 +60,14 @@ defmodule Mix.Tasks.Opal.Learn do
 
   defp execute([article_path | _], opts) do
     project_key = opts[:project] || Knowledge.project_key()
+    project_description = opts[:project_description] || Knowledge.project_description()
     source_ref = opts[:source_ref] || article_path
 
-    case Curator.learn(article_path, project_key: project_key, source_ref: source_ref) do
+    learn_opts =
+      [project_key: project_key, source_ref: source_ref]
+      |> maybe_put(:project_description, project_description)
+
+    case Curator.learn(article_path, learn_opts) do
       {:ok, proposal} ->
         Mix.shell().info(format_decision(proposal))
 
@@ -71,6 +89,9 @@ defmodule Mix.Tasks.Opal.Learn do
   defp format_decision(%{decision: {:human_review, _producer, _verdict}, rationale: r}) do
     "HUMAN REVIEW: #{r}"
   end
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp auto_apply(proposal, project_key) do
     case proposal.decision do

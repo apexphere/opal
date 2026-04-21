@@ -210,6 +210,105 @@ defmodule SymphonyElixir.CuratorTest do
     end
   end
 
+  describe "learn/2 — project context threading" do
+    test "threads :project_key and :project_description into the distiller input", ctx do
+      test_pid = self()
+
+      Application.put_env(
+        :symphony_elixir,
+        :curator_stub_response,
+        {:fn,
+         fn input, _summaries, _candidates ->
+           send(test_pid, {:saw_input, input})
+           {:ok, Proposal.reject("test")}
+         end}
+      )
+
+      assert {:ok, _} =
+               Curator.learn(ctx.article_path,
+                 project_key: ctx.project_key,
+                 project_description: "Stock and crypto technical analysis"
+               )
+
+      assert_received {:saw_input, input}
+      assert input.project_key == ctx.project_key
+      assert input.project_description == "Stock and crypto technical analysis"
+    end
+
+    test "threads the same context into the critic", ctx do
+      test_pid = self()
+
+      Application.put_env(:symphony_elixir, :curator_stub_response, {:reject, "noop"})
+
+      Application.put_env(
+        :symphony_elixir,
+        :curator_stub_critic,
+        {:fn,
+         fn _body, _summaries, _candidates, context ->
+           send(test_pid, {:saw_critic_context, context})
+           {:ok, :approve}
+         end}
+      )
+
+      assert {:ok, _} =
+               Curator.learn(ctx.article_path,
+                 project_key: ctx.project_key,
+                 project_description: "Stock and crypto technical analysis"
+               )
+
+      assert_received {:saw_critic_context, context}
+      assert context.project_key == ctx.project_key
+      assert context.project_description == "Stock and crypto technical analysis"
+    end
+
+    test "falls back to Knowledge.project_description/0 when no opt is given", ctx do
+      Application.put_env(
+        :symphony_elixir,
+        :curator_project_description,
+        "Domain from config"
+      )
+
+      test_pid = self()
+
+      Application.put_env(
+        :symphony_elixir,
+        :curator_stub_response,
+        {:fn,
+         fn input, _summaries, _candidates ->
+           send(test_pid, {:saw_input, input})
+           {:ok, Proposal.reject("test")}
+         end}
+      )
+
+      try do
+        assert {:ok, _} = Curator.learn(ctx.article_path, project_key: ctx.project_key)
+        assert_received {:saw_input, input}
+        assert input.project_description == "Domain from config"
+      after
+        Application.delete_env(:symphony_elixir, :curator_project_description)
+      end
+    end
+
+    test "project_description is nil when neither opt nor config is set", ctx do
+      Application.delete_env(:symphony_elixir, :curator_project_description)
+      test_pid = self()
+
+      Application.put_env(
+        :symphony_elixir,
+        :curator_stub_response,
+        {:fn,
+         fn input, _summaries, _candidates ->
+           send(test_pid, {:saw_input, input})
+           {:ok, Proposal.reject("test")}
+         end}
+      )
+
+      assert {:ok, _} = Curator.learn(ctx.article_path, project_key: ctx.project_key)
+      assert_received {:saw_input, input}
+      assert input.project_description == nil
+    end
+  end
+
   defp failure_payload(overrides \\ %{}) do
     Map.merge(
       %{

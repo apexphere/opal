@@ -122,4 +122,34 @@ defmodule SymphonyElixir.KnowledgeTest do
       assert Knowledge.project_key_for(tracker) == "jira_unknown"
     end
   end
+
+  describe "project_description/0" do
+    setup do
+      previous = Application.get_env(:symphony_elixir, :curator_project_description)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:symphony_elixir, :curator_project_description)
+          v -> Application.put_env(:symphony_elixir, :curator_project_description, v)
+        end
+      end)
+
+      :ok
+    end
+
+    test "returns nil when the config key is unset" do
+      Application.delete_env(:symphony_elixir, :curator_project_description)
+      assert Knowledge.project_description() == nil
+    end
+
+    test "returns the configured string when set" do
+      Application.put_env(
+        :symphony_elixir,
+        :curator_project_description,
+        "Stock and crypto technical analysis"
+      )
+
+      assert Knowledge.project_description() == "Stock and crypto technical analysis"
+    end
+  end
 end

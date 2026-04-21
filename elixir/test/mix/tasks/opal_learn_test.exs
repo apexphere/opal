@@ -157,6 +157,75 @@ defmodule Mix.Tasks.Opal.LearnTest do
     refute SymphonyElixir.Wiki.exists?("github_apexphere_opal-learn-task", "human-review-thing")
   end
 
+  test "threads --project-description through to the distiller", ctx do
+    test_pid = self()
+
+    Application.put_env(
+      :symphony_elixir,
+      :curator_stub_response,
+      {:fn,
+       fn input, _summaries, _candidates ->
+         send(test_pid, {:saw_input, input})
+         {:ok, SymphonyElixir.Curator.Proposal.reject("noop")}
+       end}
+    )
+
+    capture_io(fn ->
+      Learn.run([
+        ctx.article_path,
+        "--project",
+        "github_apexphere_opal-learn-task",
+        "--project-description",
+        "Stock and crypto technical analysis",
+        "--auto-accept"
+      ])
+    end)
+
+    assert_received {:saw_input, input}
+    assert input.project_description == "Stock and crypto technical analysis"
+  end
+
+  test "falls back to Knowledge.project_description/0 when flag is omitted", ctx do
+    previous = Application.get_env(:symphony_elixir, :curator_project_description)
+
+    Application.put_env(
+      :symphony_elixir,
+      :curator_project_description,
+      "Configured domain"
+    )
+
+    test_pid = self()
+
+    Application.put_env(
+      :symphony_elixir,
+      :curator_stub_response,
+      {:fn,
+       fn input, _summaries, _candidates ->
+         send(test_pid, {:saw_input, input})
+         {:ok, SymphonyElixir.Curator.Proposal.reject("noop")}
+       end}
+    )
+
+    try do
+      capture_io(fn ->
+        Learn.run([
+          ctx.article_path,
+          "--project",
+          "github_apexphere_opal-learn-task",
+          "--auto-accept"
+        ])
+      end)
+
+      assert_received {:saw_input, input}
+      assert input.project_description == "Configured domain"
+    after
+      case previous do
+        nil -> Application.delete_env(:symphony_elixir, :curator_project_description)
+        v -> Application.put_env(:symphony_elixir, :curator_project_description, v)
+      end
+    end
+  end
+
   test "formats a REFINE decision", ctx do
     # Seed the refine target so curator's sanitize_proposal accepts it.
     :ok =
