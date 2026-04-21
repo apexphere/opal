@@ -95,31 +95,27 @@ defmodule SymphonyElixir.Curator.Critics.Codex do
 
   defp run_codex(cmd, prompt) do
     case System.find_executable(cmd) do
-      nil ->
-        {:error, {:codex_command_not_found, cmd}}
+      nil -> {:error, {:codex_command_not_found, cmd}}
+      executable -> with_tmp_files(&invoke_codex(executable, prompt, &1, &2))
+    end
+  end
 
-      executable ->
-        with_tmp_files(fn schema_path, out_path ->
-          args = [
-            "exec",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "read-only",
-            "--output-schema",
-            schema_path,
-            "-o",
-            out_path,
-            prompt
-          ]
+  defp invoke_codex(executable, prompt, schema_path, out_path) do
+    args = [
+      "exec",
+      "--skip-git-repo-check",
+      "--sandbox",
+      "read-only",
+      "--output-schema",
+      schema_path,
+      "-o",
+      out_path,
+      prompt
+    ]
 
-          case System.cmd(executable, args, stderr_to_stdout: true) do
-            {_stdout, 0} ->
-              read_output(out_path)
-
-            {output, status} ->
-              {:error, {:codex_exit, status, output}}
-          end
-        end)
+    case System.cmd(executable, args, stderr_to_stdout: true) do
+      {_stdout, 0} -> read_output(out_path)
+      {output, status} -> {:error, {:codex_exit, status, output}}
     end
   end
 

@@ -1,0 +1,11 @@
+{
+  "decision": "create",
+  "slug": "codex-output-schema",
+  "title": "codex exec --output-schema usage",
+  "topic": "cli/codex",
+  "body": "# codex exec --output-schema usage\n\n- Pass the schema file via `--output-schema <path>`.\n- Every property must appear in `required` (Codex quirk); model optional fields as nullable types and keep them in `required`.\n- Prompt goes as the final positional arg.\n- `-o <path>` writes the raw JSON body to disk (no fences).\n- Combine with `--sandbox read-only --skip-git-repo-check` for automation.\n",
+  "rationale": "captures Codex's strict all-properties-required schema quirk + standard invocation flags",
+  "critic": {
+    "verdict": "approve"
+  }
+}
