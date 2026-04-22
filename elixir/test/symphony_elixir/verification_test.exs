@@ -25,7 +25,7 @@ defmodule SymphonyElixir.VerificationTest do
     }
 
     Enum.reduce(
-      [:critic_enabled, :critic_timeout_ms, :task_summary, :diff, :critic_fun],
+      [:critic_enabled, :critic_timeout_ms, :task_summary, :diff, :critic_fun, :issue_id, :identifier],
       base,
       fn key, acc ->
         case Keyword.fetch(opts, key) do
@@ -193,19 +193,28 @@ defmodule SymphonyElixir.VerificationTest do
         {:ok, :approve}
       end
 
-      outcome =
-        Verification.verify(
-          workspace,
-          settings(
-            critic_enabled: true,
-            critic_fun: critic_fun,
-            task_summary: "Add --json flag",
-            diff: "+ new line"
-          )
-        )
+      log =
+        capture_log(fn ->
+          outcome =
+            Verification.verify(
+              workspace,
+              settings(
+                critic_enabled: true,
+                critic_fun: critic_fun,
+                task_summary: "Add --json flag",
+                diff: "+ new line",
+                issue_id: "gh:42",
+                identifier: "#42"
+              )
+            )
 
-      assert outcome.status == :pass
-      assert outcome.rejection == nil
+          assert outcome.status == :pass
+          assert outcome.rejection == nil
+        end)
+
+      assert log =~ "Verification critic approved recipe"
+      assert log =~ "issue_id=gh:42"
+      assert log =~ "identifier=#42"
 
       assert_received {:critic_called, "Add --json flag", "+ new line", recipe_json}
       # Recipe body should be serialized JSON the critic can read.
@@ -222,20 +231,31 @@ defmodule SymphonyElixir.VerificationTest do
         {:ok, {:reject, %{reason: "unit-tests-only", missing_coverage: "no HTTP call"}}}
       end
 
-      outcome =
-        Verification.verify(
-          workspace,
-          settings(critic_enabled: true, critic_fun: critic_fun)
-        )
+      {outcome, captured} =
+        with_log(fn ->
+          Verification.verify(
+            workspace,
+            settings(critic_enabled: true, critic_fun: critic_fun)
+          )
+        end)
 
       assert outcome.status == :rejected
       assert outcome.rejection == %{reason: "unit-tests-only", missing_coverage: "no HTTP call"}
       assert outcome.steps == []
 
-      log = Path.join(workspace, ".opal/verify-log.json") |> File.read!() |> Jason.decode!()
-      assert log["status"] == "rejected"
-      assert log["rejection"] == %{"reason" => "unit-tests-only", "missing_coverage" => "no HTTP call"}
-      assert log["steps"] == []
+      assert captured =~ "Verification critic rejected recipe"
+      assert captured =~ "unit-tests-only"
+      assert captured =~ "no HTTP call"
+
+      persisted = Path.join(workspace, ".opal/verify-log.json") |> File.read!() |> Jason.decode!()
+      assert persisted["status"] == "rejected"
+
+      assert persisted["rejection"] == %{
+               "reason" => "unit-tests-only",
+               "missing_coverage" => "no HTTP call"
+             }
+
+      assert persisted["steps"] == []
     end
 
     test "critic error falls open to recipe execution with a warning", %{workspace: workspace} do
@@ -250,7 +270,12 @@ defmodule SymphonyElixir.VerificationTest do
           outcome =
             Verification.verify(
               workspace,
-              settings(critic_enabled: true, critic_fun: critic_fun)
+              settings(
+                critic_enabled: true,
+                critic_fun: critic_fun,
+                issue_id: "gh:99",
+                identifier: "#99"
+              )
             )
 
           assert outcome.status == :pass
@@ -258,6 +283,8 @@ defmodule SymphonyElixir.VerificationTest do
 
       assert log =~ "Verification critic failed"
       assert log =~ "codex_command_not_found"
+      assert log =~ "issue_id=gh:99"
+      assert log =~ "identifier=#99"
     end
 
     test "critic crash via raise falls open", %{workspace: workspace} do

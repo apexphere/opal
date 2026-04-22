@@ -1022,7 +1022,8 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp spawn_verification_task(%State{} = state, issue_id, metadata, workspace_path, settings) do
     parent = self()
-    verify_settings = build_verify_settings(settings, metadata, workspace_path)
+    metadata_with_id = Map.put(metadata, :issue_id, issue_id)
+    verify_settings = build_verify_settings(settings, metadata_with_id, workspace_path)
 
     task_fun = fn ->
       outcome = Verification.verify(workspace_path, verify_settings)
@@ -1183,7 +1184,11 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp build_verify_settings(settings, metadata, workspace_path) do
-    base = Map.from_struct(settings)
+    base =
+      settings
+      |> Map.from_struct()
+      |> Map.put(:issue_id, Map.get(metadata, :issue_id))
+      |> Map.put(:identifier, Map.get(metadata, :identifier))
 
     if Map.get(settings, :critic_enabled) == true and
          not Map.has_key?(metadata, :critic_fun_override) do

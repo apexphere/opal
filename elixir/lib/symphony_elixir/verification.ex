@@ -49,6 +49,8 @@ defmodule SymphonyElixir.Verification do
           optional(:diff) => String.t(),
           optional(:critic_fun) => (String.t(), String.t(), String.t(), keyword() ->
                                       {:ok, Critic.verdict()} | {:error, term()}),
+          optional(:issue_id) => String.t() | nil,
+          optional(:identifier) => String.t() | nil,
           required(:required) => boolean(),
           required(:step_timeout_ms) => pos_integer()
         }
@@ -103,23 +105,50 @@ defmodule SymphonyElixir.Verification do
     diff = Map.get(settings, :diff, "")
     recipe_json = serialize_recipe(recipe)
 
+    id_tag = identifier_tag(settings)
+
     case run_critic(task_summary, diff, recipe_json, settings) do
       {:ok, :approve} ->
+        Logger.info("Verification critic approved recipe#{id_tag}")
         :approve
 
-      {:ok, {:reject, %{reason: _, missing_coverage: _} = rejection}} ->
+      {:ok, {:reject, %{reason: reason, missing_coverage: missing} = rejection}} ->
+        Logger.info(
+          "Verification critic rejected recipe#{id_tag}: #{inspect(reason)} " <>
+            "missing_coverage=#{inspect(missing)}"
+        )
+
         {:reject, rejection}
 
       {:error, reason} ->
-        Logger.warning("Verification critic failed (fail-open): #{inspect(reason)}")
+        Logger.warning("Verification critic failed (fail-open)#{id_tag}: #{inspect(reason)}")
 
         :approve
 
       :timeout ->
-        Logger.warning("Verification critic timed out (fail-open)")
+        Logger.warning("Verification critic timed out (fail-open)#{id_tag}")
         :approve
     end
   end
+
+  defp identifier_tag(settings) do
+    issue_id = Map.get(settings, :issue_id)
+    identifier = Map.get(settings, :identifier)
+
+    parts =
+      []
+      |> maybe_append("issue_id", issue_id)
+      |> maybe_append("identifier", identifier)
+
+    case parts do
+      [] -> ""
+      pairs -> " (" <> Enum.join(pairs, " ") <> ")"
+    end
+  end
+
+  defp maybe_append(parts, _key, nil), do: parts
+  defp maybe_append(parts, _key, ""), do: parts
+  defp maybe_append(parts, key, value), do: parts ++ ["#{key}=#{value}"]
 
   defp maybe_critique(_recipe, _settings), do: :approve
 
