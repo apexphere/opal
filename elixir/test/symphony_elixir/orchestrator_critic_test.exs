@@ -261,6 +261,25 @@ defmodule SymphonyElixir.OrchestratorCriticTest do
       assert result.task_summary == "Add JSON\n\nbody"
       assert is_binary(result.diff)
     end
+
+    test "threads issue_id and identifier from metadata into verify_settings" do
+      settings = %VerificationSettings{
+        enabled: true,
+        required: false,
+        step_timeout_ms: 1_000,
+        critic_enabled: false
+      }
+
+      result =
+        Orchestrator.build_verify_settings_for_test(
+          settings,
+          %{issue_id: "gh:123", identifier: "OPAL-123"},
+          "/tmp/ws"
+        )
+
+      assert result.issue_id == "gh:123"
+      assert result.identifier == "OPAL-123"
+    end
   end
 
   describe "verify_metadata_from_running" do

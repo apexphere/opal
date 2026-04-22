@@ -25,7 +25,7 @@ defmodule SymphonyElixir.VerificationTest do
     }
 
     Enum.reduce(
-      [:critic_enabled, :critic_timeout_ms, :task_summary, :diff, :critic_fun],
+      [:critic_enabled, :critic_timeout_ms, :task_summary, :diff, :critic_fun, :issue_id, :identifier],
       base,
       fn key, acc ->
         case Keyword.fetch(opts, key) do
@@ -202,7 +202,9 @@ defmodule SymphonyElixir.VerificationTest do
                 critic_enabled: true,
                 critic_fun: critic_fun,
                 task_summary: "Add --json flag",
-                diff: "+ new line"
+                diff: "+ new line",
+                issue_id: "gh:42",
+                identifier: "#42"
               )
             )
 
@@ -211,6 +213,8 @@ defmodule SymphonyElixir.VerificationTest do
         end)
 
       assert log =~ "Verification critic approved recipe"
+      assert log =~ "issue_id=gh:42"
+      assert log =~ "identifier=#42"
 
       assert_received {:critic_called, "Add --json flag", "+ new line", recipe_json}
       # Recipe body should be serialized JSON the critic can read.
@@ -266,7 +270,12 @@ defmodule SymphonyElixir.VerificationTest do
           outcome =
             Verification.verify(
               workspace,
-              settings(critic_enabled: true, critic_fun: critic_fun)
+              settings(
+                critic_enabled: true,
+                critic_fun: critic_fun,
+                issue_id: "gh:99",
+                identifier: "#99"
+              )
             )
 
           assert outcome.status == :pass
@@ -274,6 +283,8 @@ defmodule SymphonyElixir.VerificationTest do
 
       assert log =~ "Verification critic failed"
       assert log =~ "codex_command_not_found"
+      assert log =~ "issue_id=gh:99"
+      assert log =~ "identifier=#99"
     end
 
     test "critic crash via raise falls open", %{workspace: workspace} do
