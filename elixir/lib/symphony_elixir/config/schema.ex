@@ -58,12 +58,27 @@ defmodule SymphonyElixir.Config.Schema do
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
+      attrs = normalize_api_key_alias(attrs)
+
       schema
       |> cast(
         attrs,
         [:kind, :endpoint, :api_key, :project_slug, :assignee, :active_states, :terminal_states, :repo, :labels_prefix],
         empty_values: []
       )
+    end
+
+    defp normalize_api_key_alias(attrs) when is_map(attrs) do
+      cond do
+        Map.has_key?(attrs, "api_token") and not Map.has_key?(attrs, "api_key") ->
+          attrs |> Map.put("api_key", attrs["api_token"]) |> Map.delete("api_token")
+
+        Map.has_key?(attrs, :api_token) and not Map.has_key?(attrs, :api_key) ->
+          attrs |> Map.put(:api_key, attrs[:api_token]) |> Map.delete(:api_token)
+
+        true ->
+          attrs
+      end
     end
   end
 
