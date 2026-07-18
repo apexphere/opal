@@ -117,6 +117,7 @@ defmodule SymphonyElixir.TestSupport do
           claude_code_permission_mode: "acceptEdits",
           claude_code_extra_flags: [],
           claude_code_turn_timeout_ms: 3_600_000,
+          claude_code_stall_timeout_ms: 300_000,
           codex_approval_policy: %{reject: %{sandbox_approval: true, rules: true, mcp_elicitations: true}},
           codex_thread_sandbox: "workspace-write",
           codex_turn_sandbox_policy: nil,
@@ -163,6 +164,7 @@ defmodule SymphonyElixir.TestSupport do
     claude_code_permission_mode = Keyword.get(config, :claude_code_permission_mode)
     claude_code_extra_flags = Keyword.get(config, :claude_code_extra_flags)
     claude_code_turn_timeout_ms = Keyword.get(config, :claude_code_turn_timeout_ms)
+    claude_code_stall_timeout_ms = Keyword.get(config, :claude_code_stall_timeout_ms)
     codex_approval_policy = Keyword.get(config, :codex_approval_policy)
     codex_thread_sandbox = Keyword.get(config, :codex_thread_sandbox)
     codex_turn_sandbox_policy = Keyword.get(config, :codex_turn_sandbox_policy)
@@ -220,6 +222,7 @@ defmodule SymphonyElixir.TestSupport do
         "  permission_mode: #{yaml_value(claude_code_permission_mode)}",
         "  extra_flags: #{yaml_value(claude_code_extra_flags)}",
         "  turn_timeout_ms: #{yaml_value(claude_code_turn_timeout_ms)}",
+        "  stall_timeout_ms: #{yaml_value(claude_code_stall_timeout_ms)}",
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),

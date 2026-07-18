@@ -143,10 +143,75 @@ defmodule SymphonyElixir.ClaudeCode.RunnerTest do
       sleep 10
       """
 
-      {workspace, _bin} = setup_workspace(test_root, script, claude_code_turn_timeout_ms: 200)
+      {workspace, _bin} = setup_workspace(test_root, script,
+        claude_code_turn_timeout_ms: 200,
+        claude_code_stall_timeout_ms: 1_000
+      )
 
       assert {:error, :turn_timeout} =
                Runner.run_turn(workspace, "slow", default_issue())
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "returns turn_stalled when subprocess produces no output for stall_timeout_ms" do
+    test_root = Path.join(System.tmp_dir!(), "symp-claude-stall-#{System.unique_integer([:positive])}")
+
+    try do
+      # Print the init event so a session is established, then sleep without
+      # producing more output. Stall watchdog should fire well before the
+      # generous turn timeout.
+      script = """
+      #!/bin/sh
+      printf '%s\\n' '{"type":"system","subtype":"init","session_id":"sess-stall"}'
+      sleep 30
+      """
+
+      {workspace, _bin} = setup_workspace(test_root, script,
+        claude_code_turn_timeout_ms: 60_000,
+        claude_code_stall_timeout_ms: 200
+      )
+
+      pid = self()
+      on_message = fn msg -> send(pid, {:claude_event, msg.event}); :ok end
+
+      assert {:error, :turn_stalled} =
+               Runner.run_turn(workspace, "stall", default_issue(), on_message: on_message)
+
+      assert_received {:claude_event, :session_started}
+      assert_received {:claude_event, :turn_ended_with_error}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "stall_deadline refreshes on every output, so steady streams complete" do
+    test_root = Path.join(System.tmp_dir!(), "symp-claude-steady-#{System.unique_integer([:positive])}")
+
+    try do
+      # Emit init, then a message every ~50ms for 200ms (well under 500ms stall),
+      # then result + exit. Stall watchdog should NOT fire.
+      script = """
+      #!/bin/sh
+      printf '%s\\n' '{"type":"system","subtype":"init","session_id":"sess-steady"}'
+      i=0
+      while [ $i -lt 4 ]; do
+        printf '%s\\n' '{"type":"assistant","message":{"usage":{"input_tokens":1,"output_tokens":1}}}'
+        sleep 0.05
+        i=$((i + 1))
+      done
+      printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-steady","usage":{"input_tokens":4,"output_tokens":4}}'
+      exit 0
+      """
+
+      {workspace, _bin} = setup_workspace(test_root, script,
+        claude_code_turn_timeout_ms: 5_000,
+        claude_code_stall_timeout_ms: 500
+      )
+
+      assert {:ok, %{result: :turn_completed}} =
+               Runner.run_turn(workspace, "steady", default_issue())
     after
       File.rm_rf(test_root)
     end

@@ -26,6 +26,8 @@ claude_code:
   command: claude
   permission_mode: acceptEdits
   allowed_tools: "Edit,Write,Read,Bash,Glob,Grep"
+  turn_timeout_ms: 3600000      # hard wall-clock cap per turn (default 1h)
+  stall_timeout_ms: 300000      # kill if no stream-json output (default 5min)
 
 # Optional lifecycle hooks (shell commands).
 # hooks:

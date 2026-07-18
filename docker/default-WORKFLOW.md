@@ -17,6 +17,9 @@ claude_code:
   command: claude
   permission_mode: acceptEdits
   allowed_tools: "Edit,Write,Read,Bash,Glob,Grep"
+  # Kill the subprocess if no stream-json output arrives for this long
+  # (default 5 min). Catches a wedged claude faster than the 1h hard timeout.
+  stall_timeout_ms: 300000
 server:
   # Bind to 0.0.0.0 so the dashboard is reachable from outside the container
   # when started with `docker run -p 4000:4000 ...`.

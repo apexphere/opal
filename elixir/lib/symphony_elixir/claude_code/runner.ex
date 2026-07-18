@@ -136,38 +136,74 @@ defmodule SymphonyElixir.ClaudeCode.Runner do
   end
 
   defp await_completion(port, on_message, metadata, issue) do
-    timeout_ms = Config.settings!().claude_code.turn_timeout_ms
-    deadline = monotonic_ms() + timeout_ms
-    state = %{session_id: nil, last_assistant_usage: nil, line_buffer: ""}
-    do_await(port, on_message, metadata, issue, deadline, state)
+    settings = Config.settings!().claude_code
+    now = monotonic_ms()
+    turn_deadline = now + settings.turn_timeout_ms
+    stall_deadline = now + settings.stall_timeout_ms
+
+    state = %{
+      session_id: nil,
+      last_assistant_usage: nil,
+      line_buffer: "",
+      stall_timeout_ms: settings.stall_timeout_ms,
+      stall_deadline: stall_deadline
+    }
+
+    do_await(port, on_message, metadata, issue, turn_deadline, state)
   end
 
-  defp do_await(port, on_message, metadata, issue, deadline, state) do
-    remaining = deadline - monotonic_ms()
+  defp do_await(port, on_message, metadata, issue, turn_deadline, state) do
+    now = monotonic_ms()
+    turn_remaining = turn_deadline - now
+    stall_remaining = state.stall_deadline - now
 
-    if remaining <= 0 do
-      {:error, :turn_timeout}
-    else
-      receive do
-        {^port, {:data, {:eol, line}}} ->
-          full_line = state.line_buffer <> line
-          new_state = %{state | line_buffer: ""}
-          handle_line(port, on_message, metadata, issue, deadline, new_state, full_line)
+    cond do
+      turn_remaining <= 0 ->
+        {:error, :turn_timeout}
 
-        {^port, {:data, {:noeol, partial}}} ->
-          new_state = %{state | line_buffer: state.line_buffer <> partial}
-          do_await(port, on_message, metadata, issue, deadline, new_state)
+      stall_remaining <= 0 ->
+        Logger.warning(
+          "Claude Code turn stalled for #{issue_context(issue)} session_id=#{inspect(state.session_id)} stall_timeout_ms=#{state.stall_timeout_ms}"
+        )
 
-        {^port, {:exit_status, 0}} ->
-          {:ok, build_result(state, :turn_completed)}
+        {:error, :turn_stalled}
 
-        {^port, {:exit_status, status}} ->
-          {:error, {:claude_exit_status, status}}
-      after
-        remaining ->
-          {:error, :turn_timeout}
-      end
+      true ->
+        wait_window = min(turn_remaining, stall_remaining)
+        do_await_recv(port, on_message, metadata, issue, turn_deadline, state, wait_window)
     end
+  end
+
+  defp do_await_recv(port, on_message, metadata, issue, turn_deadline, state, wait_window) do
+    receive do
+      {^port, {:data, {:eol, line}}} ->
+        full_line = state.line_buffer <> line
+        new_state = %{state | line_buffer: "", stall_deadline: refreshed_stall_deadline(state)}
+        handle_line(port, on_message, metadata, issue, turn_deadline, new_state, full_line)
+
+      {^port, {:data, {:noeol, partial}}} ->
+        new_state = %{
+          state
+          | line_buffer: state.line_buffer <> partial,
+            stall_deadline: refreshed_stall_deadline(state)
+        }
+
+        do_await(port, on_message, metadata, issue, turn_deadline, new_state)
+
+      {^port, {:exit_status, 0}} ->
+        {:ok, build_result(state, :turn_completed)}
+
+      {^port, {:exit_status, status}} ->
+        {:error, {:claude_exit_status, status}}
+    after
+      wait_window ->
+        # Fall back to do_await/6 to decide which deadline tripped.
+        do_await(port, on_message, metadata, issue, turn_deadline, state)
+    end
+  end
+
+  defp refreshed_stall_deadline(%{stall_timeout_ms: stall_timeout_ms}) do
+    monotonic_ms() + stall_timeout_ms
   end
 
   defp handle_line(port, on_message, metadata, issue, deadline, state, line) do
