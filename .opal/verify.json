@@ -1,10 +1,20 @@
 {
   "version": "1",
-  "description": "Verify /healthz returns 200 when orchestrator is running and 503 when stopped",
+  "description": "Verify api_token is accepted as alias for api_key in tracker schema",
   "steps": [
     {
-      "name": "healthz endpoint exercises both orchestrator states",
-      "shell": "cd elixir && mix test test/symphony_elixir/healthz_api_test.exs 2>&1 | tail -5",
+      "name": "compile",
+      "shell": "cd elixir && mix compile 2>&1",
+      "expect_exit": 0
+    },
+    {
+      "name": "api_token_alias",
+      "shell": "cd elixir && mix run -e 'alias SymphonyElixir.Config.Schema.Tracker; cs = Tracker.changeset(%Tracker{}, %{\"api_token\" => \"tok123\", \"kind\" => \"github\", \"repo\" => \"org/repo\"}); val = Ecto.Changeset.get_field(cs, :api_key); if val == \"tok123\", do: IO.puts(\"PASS\"), else: (IO.puts(\"FAIL\"); System.halt(1))'",
+      "expect_exit": 0
+    },
+    {
+      "name": "api_key_still_works",
+      "shell": "cd elixir && mix run -e 'alias SymphonyElixir.Config.Schema.Tracker; cs = Tracker.changeset(%Tracker{}, %{\"api_key\" => \"direct\", \"kind\" => \"github\", \"repo\" => \"org/repo\"}); val = Ecto.Changeset.get_field(cs, :api_key); if val == \"direct\", do: IO.puts(\"PASS\"), else: (IO.puts(\"FAIL\"); System.halt(1))'",
       "expect_exit": 0
     }
   ]
