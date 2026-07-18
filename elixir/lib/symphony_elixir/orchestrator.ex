@@ -282,7 +282,11 @@ defmodule SymphonyElixir.Orchestrator do
         state
 
       {:error, :missing_github_api_token} ->
-        Logger.error("GitHub API token missing in WORKFLOW.md (set api_key or $GITHUB_TOKEN)")
+        Logger.error(
+          "GitHub API token missing in WORKFLOW.md (set tracker.api_key or $GITHUB_TOKEN; " <>
+            "note: api_token is not accepted — use api_key)"
+        )
+
         state
 
       {:error, :missing_github_repo} ->

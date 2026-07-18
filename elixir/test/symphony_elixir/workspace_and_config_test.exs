@@ -1550,4 +1550,20 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       File.rm_rf(test_root)
     end
   end
+
+  test "config accepts api_token as alias for api_key in tracker" do
+    workflow = """
+    ---
+    tracker:
+      kind: github
+      api_token: gh_alias_token
+      repo: org/repo
+    ---
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+
+    config = Config.settings!()
+    assert config.tracker.api_key == "gh_alias_token"
+  end
 end
